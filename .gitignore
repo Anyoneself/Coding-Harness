@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.idea/
+.mini-agent-memory.jsonl
+.ruff_cache/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.sqlite3
+.pytest_cache/
+build/
+dist/

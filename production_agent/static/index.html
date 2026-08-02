@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="基于 DeepSeek 的意图识别、工具调用与结果返回 Agent 控制台"
+    />
+    <title>DeepSeek Agent Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="任务导航">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">D</span>
+          <div>
+            <strong>DeepSeek Agent</strong>
+            <span>Console</span>
+          </div>
+        </div>
+
+        <button class="new-task" id="newTaskButton" type="button">
+          <span aria-hidden="true">+</span>
+          新任务
+        </button>
+
+        <div class="sidebar-section">
+          <p class="sidebar-label">当前任务</p>
+          <button class="task-item active" type="button">
+            <span class="task-indicator" aria-hidden="true"></span>
+            <span>
+              <strong id="taskTitle">未命名任务</strong>
+              <small id="taskSubtitle">等待输入</small>
+            </span>
+          </button>
+        </div>
+
+        <div class="sidebar-section tools-section">
+          <p class="sidebar-label">可用工具</p>
+          <div class="tool-list" id="toolList"></div>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="connection-state">
+            <span class="status-dot" id="sidebarStatusDot"></span>
+            <span id="sidebarStatusText">正在检查配置</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">
+            <span class="mobile-mark" aria-hidden="true">D</span>
+            <div>
+              <h1>Agent 工作台</h1>
+              <p id="runStatus">准备就绪</p>
+            </div>
+          </div>
+
+          <div class="topbar-controls">
+            <label class="select-control">
+              <span>角色</span>
+              <select id="roleSelect" aria-label="选择业务角色">
+                <option value="operations">中后台</option>
+                <option value="investment">投研</option>
+                <option value="ir">IR</option>
+              </select>
+            </label>
+            <label class="select-control">
+              <span>模型</span>
+              <select id="modelSelect" aria-label="选择 DeepSeek 模型"></select>
+            </label>
+            <button
+              class="icon-button activity-toggle"
+              id="activityToggle"
+              type="button"
+              title="查看执行过程"
+              aria-label="查看执行过程"
+            >
+              ≡
+            </button>
+          </div>
+        </header>
+
+        <div class="config-banner hidden" id="configBanner" role="alert"></div>
+
+        <section class="conversation" id="conversation" aria-live="polite">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-mark" aria-hidden="true">D</div>
+            <h2>把目标交给 DeepSeek Agent</h2>
+            <p>设备诊断、资料核验、实时查询或精确计算。</p>
+            <div class="suggestions" aria-label="示例任务">
+              <button type="button" data-prompt="请诊断 MX-100 的 E102 故障码，并说明依据">
+                诊断设备故障
+              </button>
+              <button type="button" data-prompt="现在上海是什么时间？再计算 128 * 36">
+                时间与计算
+              </button>
+              <button type="button" data-prompt="请核验公司研究结论应该保留哪些来源">
+                检索知识库
+              </button>
+              <button type="button" data-prompt="请诊断 MX-100 的 E102，并确认创建工单">
+                执行业务工具
+              </button>
+            </div>
+          </div>
+          <div class="message-list" id="messageList"></div>
+        </section>
+
+        <form class="composer" id="composer">
+          <div class="composer-box">
+            <textarea
+              id="messageInput"
+              rows="1"
+              maxlength="20000"
+              placeholder="描述你希望 Agent 完成的任务"
+              aria-label="任务输入"
+            ></textarea>
+            <button
+              class="send-button"
+              id="sendButton"
+              type="submit"
+              aria-label="发送任务"
+              title="发送"
+            >
+              <span id="sendIcon" aria-hidden="true">↑</span>
+            </button>
+          </div>
+          <div class="composer-meta">
+            <span id="thinkingMode">Thinking: --</span>
+          </div>
+        </form>
+      </main>
+
+      <aside class="activity-panel" id="activityPanel" aria-label="执行过程">
+        <div class="activity-header">
+          <div>
+            <h2>执行过程</h2>
+            <p>Intent · Tools · Result</p>
+          </div>
+          <button
+            class="icon-button close-activity"
+            id="closeActivity"
+            type="button"
+            aria-label="关闭执行过程"
+            title="关闭"
+          >
+            ×
+          </button>
+        </div>
+        <div class="activity-summary">
+          <div>
+            <span>状态</span>
+            <strong id="activityStatus">Idle</strong>
+          </div>
+          <div>
+            <span>调用</span>
+            <strong id="toolCount">0</strong>
+          </div>
+          <div>
+            <span>轮次</span>
+            <strong id="roundCount">0</strong>
+          </div>
+        </div>
+        <div class="activity-stream" id="activityStream">
+          <div class="activity-empty">
+            <span class="activity-line"></span>
+            <p>等待任务</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
