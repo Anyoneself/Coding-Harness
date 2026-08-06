@@ -3,9 +3,9 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deepseek-agent-console"
+name = "my-agent"
 version = "0.1.0"
-description = "DeepSeek-powered agent console with intent recognition and controlled tools"
+description = "Production-grade layered AI agent with controlled tools and a Web console"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -24,15 +24,14 @@ dev = [
 ]
 
 [project.scripts]
-deepseek-agent = "production_agent.web:main"
-investment-agent-demo = "examples.langgraph_investment_demo:main"
-production-agent-demo = "examples.production_agent_demo:main"
+my-agent = "application.cli:main"
+my-agent-demo = "examples.production_agent_demo:main"
 
 [tool.setuptools.packages.find]
-include = ["production_agent*", "examples"]
+include = ["application*", "examples"]
 
 [tool.setuptools.package-data]
-production_agent = ["static/*"]
+application = ["static/*"]
 
 [tool.ruff]
 exclude = ["examples/legacy"]

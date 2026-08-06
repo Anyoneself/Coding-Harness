@@ -1,0 +1,691 @@
+const STORAGE_KEY = "my-agent-conversations-v1";
+
+const state = {
+  sessionId: "",
+  running: false,
+  controller: null,
+  config: null,
+  toolCalls: 0,
+  rounds: 0,
+  assistantNode: null,
+  assistantPersisted: false,
+  chats: [],
+  activeChatId: "",
+};
+
+const elements = {
+  composer: document.querySelector("#composer"),
+  input: document.querySelector("#messageInput"),
+  sendButton: document.querySelector("#sendButton"),
+  sendIcon: document.querySelector("#sendIcon"),
+  conversation: document.querySelector("#conversation"),
+  emptyState: document.querySelector("#emptyState"),
+  messageList: document.querySelector("#messageList"),
+  newTask: document.querySelector("#newTaskButton"),
+  taskTitle: document.querySelector("#taskTitle"),
+  roleSelect: document.querySelector("#roleSelect"),
+  modelSelect: document.querySelector("#modelSelect"),
+  runStatus: document.querySelector("#runStatus"),
+  configBanner: document.querySelector("#configBanner"),
+  sidebarStatusDot: document.querySelector("#sidebarStatusDot"),
+  sidebarStatusText: document.querySelector("#sidebarStatusText"),
+  toolList: document.querySelector("#toolList"),
+  thinkingMode: document.querySelector("#thinkingMode"),
+  activityPanel: document.querySelector("#activityPanel"),
+  activityToggle: document.querySelector("#activityToggle"),
+  closeActivity: document.querySelector("#closeActivity"),
+  traceBackdrop: document.querySelector("#traceBackdrop"),
+  activityStream: document.querySelector("#activityStream"),
+  activityStatus: document.querySelector("#activityStatus"),
+  toolCount: document.querySelector("#toolCount"),
+  roundCount: document.querySelector("#roundCount"),
+  chatHistory: document.querySelector("#chatHistory"),
+  sidebar: document.querySelector("#sidebar"),
+  sidebarToggle: document.querySelector("#sidebarToggle"),
+  sidebarClose: document.querySelector("#sidebarClose"),
+  sidebarScrim: document.querySelector("#sidebarScrim"),
+};
+
+/** 返回适合消息和 Trace 展示的当前时间。 */
+function nowLabel() {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+/** 将动态值格式化为可阅读的 JSON。 */
+function prettyJson(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+/** 从本地存储恢复最近的对话列表。 */
+function loadChats() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    state.chats = Array.isArray(stored) ? stored.slice(0, 30) : [];
+  } catch {
+    state.chats = [];
+  }
+}
+
+/** 保存最近对话，限制数量以避免本地存储无限增长。 */
+function persistChats() {
+  const ordered = [...state.chats]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 30);
+  state.chats = ordered;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(ordered));
+}
+
+/** 创建一条新的空对话记录。 */
+function createChat() {
+  const now = Date.now();
+  return {
+    id: crypto.randomUUID(),
+    title: "新对话",
+    status: "等待输入",
+    updatedAt: now,
+    messages: [],
+  };
+}
+
+/** 返回当前选中的对话。 */
+function activeChat() {
+  return state.chats.find((chat) => chat.id === state.activeChatId) || null;
+}
+
+/** 确保页面始终存在一个可用的当前对话。 */
+function ensureActiveChat() {
+  if (!state.chats.length) {
+    state.chats.push(createChat());
+  }
+  const savedId = localStorage.getItem(`${STORAGE_KEY}:active`);
+  const selected = state.chats.find((chat) => chat.id === savedId) || state.chats[0];
+  state.activeChatId = selected.id;
+  state.sessionId = selected.id;
+}
+
+/** 根据更新时间给会话生成左侧分组。 */
+function historyGroup(updatedAt) {
+  const date = new Date(updatedAt);
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return "今天";
+  const difference = today.getTime() - date.getTime();
+  return difference < 7 * 24 * 60 * 60 * 1000 ? "最近 7 天" : "更早";
+}
+
+/** 渲染左侧会话历史，并绑定会话切换事件。 */
+function renderChatHistory() {
+  elements.chatHistory.replaceChildren();
+  if (!state.chats.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-history";
+    empty.textContent = "还没有对话。";
+    elements.chatHistory.append(empty);
+    return;
+  }
+
+  let renderedGroup = "";
+  [...state.chats]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .forEach((chat) => {
+      const group = historyGroup(chat.updatedAt);
+      if (group !== renderedGroup) {
+        const label = document.createElement("p");
+        label.className = "history-group-label";
+        label.textContent = group;
+        elements.chatHistory.append(label);
+        renderedGroup = group;
+      }
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `history-item${chat.id === state.activeChatId ? " active" : ""}`;
+      button.dataset.chatId = chat.id;
+      const title = document.createElement("strong");
+      title.textContent = chat.title || "新对话";
+      const status = document.createElement("small");
+      status.textContent = chat.status || "等待输入";
+      button.append(title, status);
+      button.addEventListener("click", () => selectChat(chat.id));
+      elements.chatHistory.append(button);
+    });
+}
+
+/** 自动调整输入框高度并保持布局稳定。 */
+function resizeInput() {
+  elements.input.style.height = "auto";
+  elements.input.style.height = `${Math.min(elements.input.scrollHeight, 180)}px`;
+}
+
+/** 更新运行状态和发送按钮行为。 */
+function setRunning(running) {
+  state.running = running;
+  elements.input.disabled = running;
+  elements.sendButton.classList.toggle("running", running);
+  elements.sendIcon.textContent = running ? "■" : "↑";
+  elements.sendButton.title = running ? "停止" : "发送";
+  elements.sendButton.setAttribute("aria-label", running ? "停止任务" : "发送消息");
+  if (!running) {
+    elements.input.disabled = false;
+    elements.input.focus();
+  }
+}
+
+/** 同步顶部状态与 Trace 状态。 */
+function setStatus(text, status = "Idle") {
+  elements.runStatus.textContent = text;
+  elements.activityStatus.textContent = status;
+}
+
+/** 更新当前对话状态并刷新历史列表。 */
+function setChatStatus(status) {
+  const chat = activeChat();
+  if (!chat) return;
+  chat.status = status;
+  chat.updatedAt = Date.now();
+  persistChats();
+  renderChatHistory();
+}
+
+/** 显示对话列表并隐藏空状态。 */
+function showConversation() {
+  elements.emptyState.classList.add("hidden");
+}
+
+/** 构建一条用户或助手消息节点。 */
+function createMessageNode(role, content, pending = false) {
+  const article = document.createElement("article");
+  article.className = `message ${role}`;
+
+  if (role === "assistant") {
+    const avatar = document.createElement("div");
+    avatar.className = "assistant-avatar";
+    avatar.textContent = "M";
+    article.append(avatar);
+  }
+
+  const body = document.createElement("div");
+  body.className = "message-body";
+  const heading = document.createElement("div");
+  heading.className = "message-heading";
+  const name = document.createElement("strong");
+  name.textContent = role === "user" ? "你" : "My-Agent";
+  const time = document.createElement("span");
+  time.textContent = nowLabel();
+  heading.append(name, time);
+
+  const text = document.createElement("div");
+  text.className = `message-content${pending ? " pending" : ""}`;
+  if (pending) {
+    const dots = document.createElement("span");
+    dots.className = "thinking-dots";
+    dots.innerHTML = "<span></span><span></span><span></span>";
+    const label = document.createElement("span");
+    label.textContent = content;
+    text.append(dots, label);
+  } else {
+    text.textContent = content;
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "message-meta";
+  body.append(heading, text, meta);
+  article.append(body);
+  return { article, text, meta };
+}
+
+/** 将消息写入当前对话，并按需持久化到本地历史。 */
+function addMessage(role, content, { pending = false, persist = true } = {}) {
+  showConversation();
+  const node = createMessageNode(role, content, pending);
+  elements.messageList.append(node.article);
+  elements.conversation.scrollTop = elements.conversation.scrollHeight;
+
+  if (persist) {
+    const chat = activeChat();
+    if (chat) {
+      chat.messages.push({ role, content });
+      if (role === "user" && chat.title === "新对话") {
+        chat.title = content.slice(0, 28);
+      }
+      chat.updatedAt = Date.now();
+      persistChats();
+      renderChatHistory();
+      elements.taskTitle.textContent = chat.title;
+    }
+  }
+  return node;
+}
+
+/** 保存最终助手消息，避免同一轮被重复写入历史。 */
+function persistAssistantMessage(content) {
+  if (state.assistantPersisted) return;
+  const chat = activeChat();
+  if (!chat) return;
+  chat.messages.push({ role: "assistant", content });
+  chat.updatedAt = Date.now();
+  state.assistantPersisted = true;
+  persistChats();
+  renderChatHistory();
+}
+
+/** 用最终结果替换助手等待状态。 */
+function updateAssistant(content, isError = false) {
+  if (!state.assistantNode) {
+    state.assistantNode = addMessage("assistant", content, { persist: false });
+  } else {
+    state.assistantNode.text.classList.remove("pending");
+    state.assistantNode.text.replaceChildren();
+    state.assistantNode.text.textContent = content;
+  }
+  state.assistantNode.text.classList.toggle("error-text", isError);
+  persistAssistantMessage(content);
+  elements.conversation.scrollTop = elements.conversation.scrollHeight;
+}
+
+/** 为当前助手消息添加简短运行元数据。 */
+function addMeta(label) {
+  if (!state.assistantNode) return;
+  const chip = document.createElement("span");
+  chip.className = "meta-chip";
+  chip.textContent = label;
+  state.assistantNode.meta.append(chip);
+}
+
+/** 清空上一轮 Trace 事件和统计。 */
+function clearActivity() {
+  state.toolCalls = 0;
+  state.rounds = 0;
+  elements.toolCount.textContent = "0";
+  elements.roundCount.textContent = "0";
+  elements.activityStream.replaceChildren();
+}
+
+/** 向 Trace 抽屉追加一条结构化事件。 */
+function addActivity(kind, title, body = "", tags = [], details = null) {
+  const item = document.createElement("div");
+  item.className = `activity-event ${kind}`;
+  const dot = document.createElement("span");
+  dot.className = "event-dot";
+  const heading = document.createElement("div");
+  heading.className = "event-heading";
+  const headingText = document.createElement("strong");
+  headingText.textContent = title;
+  const time = document.createElement("span");
+  time.textContent = nowLabel();
+  heading.append(headingText, time);
+  item.append(dot, heading);
+
+  if (body) {
+    const description = document.createElement("div");
+    description.className = "event-body";
+    description.textContent = body;
+    item.append(description);
+  }
+  if (tags.length) {
+    const tagWrap = document.createElement("div");
+    tagWrap.className = "event-tags";
+    tags.forEach((tag) => {
+      const tagNode = document.createElement("span");
+      tagNode.className = "event-tag";
+      tagNode.textContent = tag;
+      tagWrap.append(tagNode);
+    });
+    item.append(tagWrap);
+  }
+  if (details !== null) {
+    const detailNode = document.createElement("pre");
+    detailNode.className = "event-details";
+    detailNode.textContent = prettyJson(details);
+    item.append(detailNode);
+  }
+  elements.activityStream.append(item);
+  elements.activityStream.scrollTop = elements.activityStream.scrollHeight;
+  return item;
+}
+
+/** 根据服务端事件更新对话、状态和 Trace。 */
+function handleAgentEvent(event) {
+  switch (event.type) {
+    case "started":
+      setStatus(`请求 ${event.request_id.slice(0, 8)} · ${event.model}`, "Running");
+      addActivity("model", "任务已开始", event.model, ["request"]);
+      break;
+    case "intent": {
+      const confidence = Math.round((event.confidence || 0) * 100);
+      addActivity(
+        "intent",
+        "意图识别完成",
+        event.needs_clarification
+          ? event.clarification_question || "模型建议澄清"
+          : "已提取目标、实体和候选工具",
+        [...(event.intents || []), `confidence:${confidence}%`],
+        {
+          entities: event.entities || {},
+          suggested_tools: event.suggested_tools || [],
+        },
+      );
+      addMeta(`intent ${confidence}%`);
+      break;
+    }
+    case "model_round":
+      state.rounds = Math.max(state.rounds, event.round || 0);
+      elements.roundCount.textContent = String(state.rounds);
+      setStatus(event.message || "DeepSeek 正在处理", "Running");
+      addActivity("model", `模型轮次 ${event.round}`, event.message || "规划下一步");
+      break;
+    case "tool_call":
+      state.toolCalls += 1;
+      elements.toolCount.textContent = String(state.toolCalls);
+      setStatus(`正在调用 ${event.name}`, "Tool");
+      addActivity("tool", event.name, "工具参数已进入服务端注册表", ["running"], event.arguments);
+      break;
+    case "tool_result": {
+      const status = event.result?.status || "completed";
+      addActivity(
+        status === "failed" || status === "blocked" ? "error" : "tool",
+        `${event.name} 返回`,
+        status === "blocked" ? "执行器阻止了本次操作" : `状态：${status}`,
+        [status],
+        event.result,
+      );
+      addMeta(`${event.name}:${status}`);
+      break;
+    }
+    case "final": {
+      updateAssistant(event.answer);
+      const totalTokens = event.usage?.total_tokens;
+      if (totalTokens) addMeta(`${totalTokens} tokens`);
+      addMeta(`${state.rounds} rounds`);
+      addActivity(
+        "final",
+        "结果已返回",
+        event.finish_reason ? `finish: ${event.finish_reason}` : "模型完成任务",
+        totalTokens ? [`tokens:${totalTokens}`] : [],
+      );
+      setStatus("任务完成", "Done");
+      setChatStatus("已完成");
+      break;
+    }
+    case "error":
+      updateAssistant(event.message || "任务执行失败。", true);
+      addActivity("error", "任务失败", event.message || "未知错误");
+      setStatus("执行失败", "Error");
+      setChatStatus("失败");
+      break;
+    default:
+      break;
+  }
+}
+
+/** 解析一个标准 SSE 事件块。 */
+function parseEventBlock(block) {
+  let eventName = "message";
+  const dataLines = [];
+  block.split("\n").forEach((line) => {
+    if (line.startsWith("event:")) eventName = line.slice(6).trim();
+    if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+  });
+  if (!dataLines.length) return null;
+  try {
+    const parsed = JSON.parse(dataLines.join("\n"));
+    parsed.type ||= eventName;
+    return parsed;
+  } catch {
+    return { type: "error", message: "无法解析服务端事件。" };
+  }
+}
+
+/** 持续读取 SSE 响应并分发完整事件。 */
+async function consumeEventStream(response) {
+  if (!response.ok || !response.body) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() || "";
+    blocks.forEach((block) => {
+      const event = parseEventBlock(block);
+      if (event) handleAgentEvent(event);
+    });
+  }
+  if (buffer.trim()) {
+    const event = parseEventBlock(buffer);
+    if (event) handleAgentEvent(event);
+  }
+}
+
+/** 发送一条用户消息并消费后端流式响应。 */
+async function sendTask(message) {
+  if (!state.config?.ready) {
+    state.assistantPersisted = false;
+    state.assistantNode = addMessage("assistant", "正在检查服务配置", { pending: true, persist: false });
+    updateAssistant("尚未配置 DEEPSEEK_API_KEY，请先完成服务端配置。", true);
+    return;
+  }
+
+  clearActivity();
+  state.assistantNode = null;
+  state.assistantPersisted = false;
+  addMessage("user", message);
+  state.assistantNode = addMessage("assistant", "正在思考", { pending: true, persist: false });
+  elements.input.value = "";
+  resizeInput();
+  setRunning(true);
+  setStatus("正在连接 DeepSeek", "Starting");
+  setChatStatus("执行中");
+  state.controller = new AbortController();
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        session_id: state.sessionId,
+        role: elements.roleSelect.value,
+        model: elements.modelSelect.value,
+      }),
+      signal: state.controller.signal,
+    });
+    await consumeEventStream(response);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      updateAssistant("任务已在当前页面停止。 ");
+      addActivity("error", "任务已停止", "客户端终止了事件流");
+      setStatus("已停止", "Stopped");
+      setChatStatus("已停止");
+    } else {
+      updateAssistant(`连接服务失败：${error.message}`, true);
+      addActivity("error", "连接失败", error.message);
+      setStatus("连接失败", "Error");
+      setChatStatus("连接失败");
+    }
+  } finally {
+    state.controller = null;
+    setRunning(false);
+  }
+}
+
+/** 将当前对话内容恢复到主对话区。 */
+function renderActiveChat() {
+  const chat = activeChat();
+  elements.messageList.replaceChildren();
+  state.assistantNode = null;
+  state.assistantPersisted = false;
+  elements.taskTitle.textContent = chat?.title || "新对话";
+  setStatus(chat?.status || "准备就绪", "Idle");
+
+  if (!chat || !chat.messages.length) {
+    elements.emptyState.classList.remove("hidden");
+    return;
+  }
+
+  elements.emptyState.classList.add("hidden");
+  chat.messages.forEach((message) => {
+    const node = createMessageNode(message.role, message.content);
+    elements.messageList.append(node.article);
+  });
+  elements.conversation.scrollTop = elements.conversation.scrollHeight;
+}
+
+/** 选择指定历史会话并恢复其本地消息。 */
+function selectChat(chatId) {
+  if (state.running || chatId === state.activeChatId) return;
+  const chat = state.chats.find((item) => item.id === chatId);
+  if (!chat) return;
+  state.activeChatId = chat.id;
+  state.sessionId = chat.id;
+  localStorage.setItem(`${STORAGE_KEY}:active`, chat.id);
+  clearActivity();
+  renderChatHistory();
+  renderActiveChat();
+  closeSidebar();
+  elements.input.focus();
+}
+
+/** 创建新会话并保留已有历史记录。 */
+function createNewTask() {
+  if (state.running && state.controller) state.controller.abort();
+  const chat = createChat();
+  state.chats.unshift(chat);
+  state.activeChatId = chat.id;
+  state.sessionId = chat.id;
+  localStorage.setItem(`${STORAGE_KEY}:active`, chat.id);
+  persistChats();
+  clearActivity();
+  renderChatHistory();
+  renderActiveChat();
+  closeSidebar();
+  elements.input.focus();
+}
+
+/** 打开右侧 Trace 抽屉。 */
+function openTrace() {
+  elements.activityPanel.classList.add("open");
+  elements.traceBackdrop.classList.add("open");
+}
+
+/** 关闭右侧 Trace 抽屉。 */
+function closeTrace() {
+  elements.activityPanel.classList.remove("open");
+  elements.traceBackdrop.classList.remove("open");
+}
+
+/** 在窄屏设备上打开左侧会话栏。 */
+function openSidebar() {
+  elements.sidebar.classList.add("open");
+  elements.sidebarScrim.classList.add("open");
+}
+
+/** 在窄屏设备上关闭左侧会话栏。 */
+function closeSidebar() {
+  elements.sidebar.classList.remove("open");
+  elements.sidebarScrim.classList.remove("open");
+}
+
+/** 从服务端加载模型、工具和连接状态。 */
+async function loadConfig() {
+  try {
+    const response = await fetch("/api/config");
+    state.config = await response.json();
+    elements.modelSelect.replaceChildren();
+    state.config.allowed_models.forEach((model) => {
+      const option = document.createElement("option");
+      option.value = model;
+      option.textContent = model;
+      option.selected = model === state.config.model;
+      elements.modelSelect.append(option);
+    });
+    elements.toolList.replaceChildren();
+    state.config.tools.forEach((tool) => {
+      const pill = document.createElement("span");
+      pill.className = "tool-pill";
+      pill.textContent = tool;
+      pill.title = tool;
+      elements.toolList.append(pill);
+    });
+    elements.thinkingMode.textContent = state.config.thinking_enabled
+      ? `深度思考 · ${state.config.reasoning_effort}`
+      : "深度思考 · 已关闭";
+    elements.sidebarStatusDot.className = `status-dot ${state.config.ready ? "ready" : "error"}`;
+    elements.sidebarStatusText.textContent = state.config.ready
+      ? "DeepSeek 已连接"
+      : "等待 API Key";
+    if (!state.config.ready) {
+      elements.configBanner.textContent =
+        "未检测到 DEEPSEEK_API_KEY。完成服务端配置后即可调用真实 DeepSeek 模型。";
+      elements.configBanner.classList.remove("hidden");
+    }
+  } catch (error) {
+    elements.configBanner.textContent = `无法读取服务配置：${error.message}`;
+    elements.configBanner.classList.remove("hidden");
+    elements.sidebarStatusDot.className = "status-dot error";
+    elements.sidebarStatusText.textContent = "服务不可用";
+  }
+}
+
+/** 初始化对话、配置和页面事件。 */
+function initialize() {
+  loadChats();
+  ensureActiveChat();
+  renderChatHistory();
+  renderActiveChat();
+  loadConfig();
+  elements.input.focus();
+}
+
+elements.composer.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (state.running) {
+    state.controller?.abort();
+    return;
+  }
+  const message = elements.input.value.trim();
+  if (message) sendTask(message);
+});
+
+elements.input.addEventListener("input", resizeInput);
+elements.input.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    elements.composer.requestSubmit();
+  }
+});
+
+document.querySelectorAll("[data-prompt]").forEach((button) => {
+  button.addEventListener("click", () => {
+    elements.input.value = button.dataset.prompt;
+    resizeInput();
+    elements.input.focus();
+  });
+});
+
+elements.newTask.addEventListener("click", createNewTask);
+elements.activityToggle.addEventListener("click", openTrace);
+elements.closeActivity.addEventListener("click", closeTrace);
+elements.traceBackdrop.addEventListener("click", closeTrace);
+elements.sidebarToggle.addEventListener("click", openSidebar);
+elements.sidebarClose.addEventListener("click", closeSidebar);
+elements.sidebarScrim.addEventListener("click", closeSidebar);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeTrace();
+    closeSidebar();
+  }
+});
+
+initialize();

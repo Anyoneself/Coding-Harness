@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="My-Agent 企业级意图识别、工具调用与结果返回控制台"
+    />
+    <title>My-Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="对话导航">
+        <div class="sidebar-header">
+          <div class="brand" aria-label="My-Agent 智能工作台">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 40 40" fill="none"><path d="M20 2.5c1.8 10.2 7.3 15.7 17.5 17.5C27.3 21.8 21.8 27.3 20 37.5 18.2 27.3 12.7 21.8 2.5 20 12.7 18.2 18.2 12.7 20 2.5Z" fill="currentColor"/></svg>
+            </span>
+            <strong>My-Agent 工作台</strong>
+          </div>
+          <div class="sidebar-actions">
+            <button class="icon-button" id="activityToggle" type="button" title="查看执行过程" aria-label="查看执行过程">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+            <button class="icon-button sidebar-close" id="sidebarClose" type="button" aria-label="关闭对话栏" title="关闭对话栏">×</button>
+          </div>
+        </div>
+
+        <button class="new-chat-button" id="newTaskButton" type="button">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>新建对话</span>
+        </button>
+
+        <div class="history-section">
+          <div class="chat-history" id="chatHistory"></div>
+        </div>
+
+        <div class="sidebar-footer">
+          <details class="tools-disclosure">
+            <summary>已启用工具</summary>
+            <div class="tool-list" id="toolList"></div>
+          </details>
+          <div class="connection-state">
+            <span class="status-dot" id="sidebarStatusDot"></span>
+            <span id="sidebarStatusText">正在检查配置</span>
+          </div>
+        </div>
+      </aside>
+
+      <button class="sidebar-scrim" id="sidebarScrim" type="button" aria-label="关闭对话栏"></button>
+
+      <main class="chat-main">
+        <header class="chat-header">
+          <button class="icon-button sidebar-toggle" id="sidebarToggle" type="button" aria-label="打开对话栏" title="打开对话栏">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <div class="chat-heading"><strong id="taskTitle">新对话</strong><span id="runStatus">准备就绪</span></div>
+        </header>
+
+        <div class="config-banner hidden" id="configBanner" role="alert"></div>
+
+        <section class="conversation" id="conversation" aria-live="polite">
+          <div class="empty-state" id="emptyState">
+            <div class="welcome-title"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M20 2.5c1.8 10.2 7.3 15.7 17.5 17.5C27.3 21.8 21.8 27.3 20 37.5 18.2 27.3 12.7 21.8 2.5 20 12.7 18.2 18.2 12.7 20 2.5Z" fill="currentColor"/></svg></span><h1>开始与 My-Agent 智能助手对话</h1></div>
+            <div class="mode-switch" aria-label="对话模式">
+              <label class="mode-option active"><span>⚡</span>通用<select id="roleSelect" aria-label="选择访问配置"><option value="standard">标准</option></select></label>
+              <span class="mode-divider" aria-hidden="true"></span>
+              <span class="mode-option muted">▱ 深度</span>
+              <span class="mode-divider" aria-hidden="true"></span>
+              <span class="mode-option muted">▣ 视觉</span>
+            </div>
+          </div>
+          <div class="message-list" id="messageList"></div>
+        </section>
+
+        <form class="composer" id="composer">
+          <div class="composer-shell">
+            <textarea id="messageInput" rows="1" maxlength="20000" placeholder="输入你的任务或问题…" aria-label="消息输入"></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-options">
+                <span class="thinking-mode" id="thinkingMode">深度思考 · --</span>
+                <label class="model-select" title="选择 DeepSeek 模型"><span>模型</span><select id="modelSelect" aria-label="选择 DeepSeek 模型"></select></label>
+              </div>
+              <button class="send-button" id="sendButton" type="submit" aria-label="发送消息" title="发送"><span id="sendIcon" aria-hidden="true">↑</span></button>
+            </div>
+          </div>
+          <p class="composer-note">AI 生成内容可能存在错误，请核验重要信息。</p>
+        </form>
+      </main>
+
+      <button class="trace-backdrop" id="traceBackdrop" type="button" aria-label="关闭执行过程"></button>
+      <aside class="trace-drawer" id="activityPanel" aria-label="Trace 执行过程">
+        <div class="trace-header"><div><h2>执行过程</h2><p>Intent · Model · Tools · Result</p></div><button class="icon-button" id="closeActivity" type="button" aria-label="关闭执行过程" title="关闭">×</button></div>
+        <div class="trace-summary"><div><span>状态</span><strong id="activityStatus">Idle</strong></div><div><span>工具调用</span><strong id="toolCount">0</strong></div><div><span>模型轮次</span><strong id="roundCount">0</strong></div></div>
+        <div class="activity-stream" id="activityStream"><div class="activity-empty"><span class="activity-line"></span><p>发送消息后，这里会展示结构化执行过程。</p></div></div>
+      </aside>
+    </div>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

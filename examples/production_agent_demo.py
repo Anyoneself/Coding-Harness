@@ -7,8 +7,8 @@ import argparse
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from production_agent.evaluation import DEFAULT_EVALUATION_CASES, EvaluationSuite
-from production_agent.runtime import AgentService
+from application.services.evaluation import DEFAULT_EVALUATION_CASES, EvaluationSuite
+from application.services.local_agent import AgentService
 
 
 def run_request(service: AgentService, args: argparse.Namespace) -> None:
@@ -48,18 +48,17 @@ def run_request(service: AgentService, args: argparse.Namespace) -> None:
 
 
 def run_concurrency_demo(service: AgentService) -> None:
-    """演示重复请求、工具幂等和同一会话的乐观锁更新。"""
+    """演示同一会话的并发请求如何通过乐观锁保持一致。"""
 
-    request = "请诊断 MX-100 的 E102，并确认创建工单"
+    request = "请检索项目规划模板"
 
     def invoke(index: int):
         # 两个线程模拟上游把同一个请求重复投递到 Agent 服务。
         return service.handle(
             user="concurrent-user",
-            role="operations",
+            role="standard",
             request=request,
             session_id="same-session",
-            # 使用相同 request_id，让写工具生成相同幂等键。
             request_id="duplicate-delivery-request",
             conflict_retries=2,
         )
@@ -68,7 +67,7 @@ def run_concurrency_demo(service: AgentService) -> None:
     with ThreadPoolExecutor(max_workers=2) as executor:
         states = list(executor.map(invoke, range(2)))
 
-    # 预期：会话版本分别为 1、2，但 ticket_id 相同，实际写入次数只有 1。
+    # 预期：会话版本分别为 1、2，且不会发生旧版本覆盖新版本。
     print("=== 并发会话结果 ===")
     print(
         json.dumps(
@@ -77,8 +76,7 @@ def run_concurrency_demo(service: AgentService) -> None:
                     "delivery": index,
                     "request_id": state["request_id"],
                     "session_version": state["persisted_session_version"],
-                    "ticket": state["tool_results"][0]["output"]["ticket_id"],
-                    "idempotency_replayed": state["tool_results"][0]["replayed"],
+                    "status": state["status"],
                 }
                 for index, state in enumerate(states)
             ],
@@ -86,7 +84,6 @@ def run_concurrency_demo(service: AgentService) -> None:
             indent=2,
         )
     )
-    print(f"实际写入工单次数：{service.tools.created_ticket_count}")
 
 
 def run_evaluation(service: AgentService, split: str) -> None:
@@ -118,13 +115,12 @@ def main() -> None:
     request_parser.add_argument("--user", default="alice")
     request_parser.add_argument(
         "--role",
-        choices=("investment", "ir", "operations"),
-        default="operations",
+        default="standard",
     )
     request_parser.add_argument("--session", default="demo-session")
     request_parser.add_argument(
         "--request",
-        default="请诊断 MX-100 的 E102 故障码",
+        default="请分析这份资料并给出可验证的结论",
     )
 
     subparsers.add_parser("concurrency", help="演示会话乐观锁和工具幂等")
@@ -144,9 +140,9 @@ def main() -> None:
     else:
         if args.command is None:
             args.user = "alice"
-            args.role = "operations"
+            args.role = "standard"
             args.session = "demo-session"
-            args.request = "请诊断 MX-100 的 E102 故障码"
+            args.request = "请分析这份资料并给出可验证的结论"
         run_request(service, args)
 
 
