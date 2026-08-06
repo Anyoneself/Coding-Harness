@@ -7,6 +7,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Protocol
 
 from ..domain.models import RetrievalHit
 from ..infrastructure.security import inspect_untrusted_content, stable_hash
@@ -40,6 +41,24 @@ class SearchDiagnostics:
     total_documents: int
     candidate_documents: int
     fusion_method: str = "rrf"
+
+
+class KnowledgeRepository(Protocol):
+    """定义模型知识工具依赖的检索仓储契约。"""
+
+    @property
+    def active_version(self) -> int:
+        """返回当前对查询生效的知识版本。"""
+        ...
+
+    def search(
+        self,
+        query: str,
+        allowed_domains: set[str] | None = None,
+        top_k: int = 5,
+    ) -> tuple[list[RetrievalHit], SearchDiagnostics]:
+        """检索知识并返回命中和诊断信息。"""
+        ...
 
 
 @dataclass

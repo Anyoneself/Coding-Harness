@@ -4,8 +4,8 @@
 
 My-Agent 是一个采用传统 Web 分层思想组织的企业级 AI Agent 工程。当前系统同时保留两条运行链：
 
-1. **真实模型链**：通过 FastAPI、SSE、DeepSeek Function Calling 和受控工具完成在线任务。
-2. **本地机制链**：通过确定性规则、版本化知识库、SQLite 会话和评估套件验证生产机制，不依赖真实模型 Token。
+1. **真实模型链**：通过 FastAPI、SSE、DeepSeek Function Calling、PostgreSQL、Milvus 和受控工具完成在线任务。
+2. **本地机制链**：通过确定性规则、版本化知识库、内存 SQLite 会话和评估套件验证生产机制，不依赖真实模型 Token。
 
 两条链共享领域规则、知识仓储、安全能力和工具执行约束，但入口和主要用途不同。真实模型链面向 Web 用户，本地机制链面向开发、回归测试和机制评估。
 
@@ -72,18 +72,20 @@ controllers / cli
 
 ### 4.2 对话请求
 
-1. 浏览器向 `POST /api/chat` 提交 `ChatRequest`。
+1. 浏览器向 `POST /api/chat` 提交 `ChatRequest`，并可覆盖本轮 `thinking_enabled` 与只接受 `low`、`high`、`max` 的 `reasoning_effort`。
 2. `application.controllers.http` 校验请求并创建 SSE 响应。
-3. `AgentChatService.stream_chat` 检查模型配置，并调用 `DeepSeekAgent.run`。
+3. `AgentChatService.stream_chat` 从 PostgreSQL 读取会话历史，并调用无状态的 `DeepSeekAgent.run`。
 4. `DeepSeekAgent` 首先使用意图识别提示词生成结构化意图。
 5. Agent 使用系统提示词进入 Function Calling 循环。
 6. `ToolRegistry` 只执行显式注册的工具，并统一转换阻断和失败结果。
-7. Controller 将 `started`、`intent`、`tool_call`、`tool_result`、`final` 等事件编码为 SSE。
-8. 前端根据稳定事件类型更新对话区和执行过程面板。
+7. Runtime 使用 DeepSeek Streaming API，把公开回答转换为 `answer_delta`，把官方响应中的 `reasoning_content` 转换为 `thinking_delta`，并在工具调用轮次回传完整推理上下文。
+8. Controller 将 `started`、`intent`、`thinking_delta`、`tool_call`、`tool_result`、`answer_delta`、`final` 等事件编码为 SSE。
+9. `AgentChatService` 按请求顺序持久化全部事件，并在最终回答前保存会话历史。
+10. 前端收到 `answer_delta` 后立即追加文本，收到 `final` 后校准并持久化完整回答。
 
 ### 4.3 会话并发
 
-真实模型链在 `DeepSeekAgent` 内维护进程级会话历史，并为每个 `session_id` 创建独立锁。同一会话请求串行执行，不同会话可以并行执行。
+真实模型链由 `AgentChatService` 维护会话级锁，并通过 `PostgresSessionStore` 持久化模型历史和结构化事件。同一进程内的同一会话请求串行执行；跨进程并发保存使用 PostgreSQL 乐观锁检测冲突。知识工具通过 `MilvusKnowledgeBase` 使用 COSINE 向量检索，并继续执行不可信内容隔离。
 
 ## 5. 本地机制请求链
 
@@ -180,8 +182,10 @@ Domain 不依赖 FastAPI、CLI、OpenAI Client 或 SQLite 连接。
 
 负责数据访问与本地索引。
 
-- `session.py`：SQLite 会话存储、乐观锁更新和进程内幂等记录。
-- `knowledge.py`：知识文档、版本化索引快照、倒排索引、来源分区索引和答案缓存。
+- `session.py`：会话仓储协议、SQLite 测试实现和进程内幂等记录。
+- `postgres_session.py`：PostgreSQL 连接池、JSONB 会话、事件表和乐观锁实现。
+- `knowledge.py`：知识仓储协议、本地版本化索引、倒排索引和答案缓存。
+- `milvus_knowledge.py`：Milvus 集合、确定性哈希向量、COSINE 检索和知识版本。
 - `__init__.py`：导出稳定的数据访问类型。
 
 Repository 对 Service 提供业务语义方法，不向上层暴露 SQL 或索引构建细节。
@@ -268,7 +272,9 @@ Agent 工作区工具的默认示例目录。该目录中的文件是工具操�
 
 ## 7. 状态、存储与缓存
 
-- 真实模型会话：保存在 `DeepSeekAgent` 进程内内存中，重启后不会保留。
+- 真实模型会话：默认保存在本地 Docker PostgreSQL，Web 与 CLI 使用相同仓储契约，重启后可以继续上下文。
+- 真实模型事件：按会话、请求 ID 和请求内序号写入 PostgreSQL JSONB；清理上下文时保留事件用于审计。
+- 真实模型知识：默认写入 Milvus Standalone；集合首次使用时自动建立，并写入当前默认知识文档。
 - 本地机制会话：默认使用内存 SQLite，也可以向 `SessionStore` 传入数据库路径。
 - 幂等记录：当前为进程内存实现，适合测试和单进程演示。
 - 知识索引：使用不可变版本快照；新版本构建完成后再原子切换。
@@ -285,7 +291,7 @@ Agent 工作区工具的默认示例目录。该目录中的文件是工具操�
 - 命令执行不经过 Shell，只允许白名单程序和参数。
 - 外部内容会执行提示词注入检测并放入不可信数据边界。
 - Trace 只记录脱敏摘要，不保存完整 Prompt、密钥和个人身份。
-- 前端不展示模型隐藏推理过程。
+- 前端可以在明确标注的独立区域展示当前请求的 DeepSeek `reasoning_content`；Trace 与持久化审计事件只保留推理字符计数，不保存原文。
 
 ## 9. 扩展方式
 
@@ -314,7 +320,7 @@ Agent 工作区工具的默认示例目录。该目录中的文件是工具操�
 
 ### 替换数据库或知识引擎
 
-优先保持 `SessionStore`、`VersionedKnowledgeBase` 对 Service 的业务接口稳定，在 Repository 或 Infrastructure 层替换实现，不修改 Controller 协议。
+优先保持 `SessionRepository`、`KnowledgeRepository` 对 Service 的业务接口稳定，在 Repository 或 Infrastructure 层替换实现，不修改 Controller 协议。
 
 ## 10. 验证命令
 

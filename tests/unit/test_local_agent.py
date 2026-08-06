@@ -130,6 +130,24 @@ class InfrastructureTests(unittest.TestCase):
         with self.assertRaises(ConcurrentUpdateError):
             store.save("same-session", 0, {"value": 2})
 
+    def test_session_reset_keeps_audit_events(self) -> None:
+        """验证清理对话上下文时保留已经记录的审计事件。"""
+        store = SessionStore()
+        store.save("audit-session", 0, {"messages": [{"role": "user", "content": "hi"}]})
+        store.append_event(
+            session_id="audit-session",
+            request_id="request-1",
+            sequence=1,
+            event={"type": "started", "request_id": "request-1"},
+        )
+
+        store.delete_session("audit-session")
+
+        self.assertEqual((0, {}), store.load("audit-session"))
+        events = store.list_events("audit-session")
+        self.assertEqual(1, len(events))
+        self.assertEqual("started", events[0].event_type)
+
     def test_concurrent_requests_preserve_state_versions(self) -> None:
         """验证并发请求通过重试保留连续的会话版本。"""
         service = AgentService()

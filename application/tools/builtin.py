@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..config import DeepSeekSettings
 from ..infrastructure.security import inspect_untrusted_content
-from ..repositories.knowledge import DEFAULT_DOCUMENTS, VersionedKnowledgeBase
+from ..infrastructure.storage import build_knowledge_repository
+from ..repositories.knowledge import KnowledgeRepository
 from .base import AgentContext, ToolDefinition, ToolRegistry, object_schema
 from .workspace import WorkspaceToolConfig, WorkspaceToolset
 
@@ -62,10 +63,10 @@ class _Calculator:
 def build_tool_registry(
     settings: DeepSeekSettings,
     *,
-    knowledge_base: VersionedKnowledgeBase | None = None,
+    knowledge_base: KnowledgeRepository | None = None,
 ) -> ToolRegistry:
     """根据配置装配通用、工作区和联网工具注册表。"""
-    knowledge = knowledge_base or VersionedKnowledgeBase(DEFAULT_DOCUMENTS)
+    knowledge = knowledge_base or build_knowledge_repository(settings)
     definitions = _core_tool_definitions(knowledge)
 
     if settings.workspace_tools_enabled:
@@ -77,7 +78,7 @@ def build_tool_registry(
 
 
 def _core_tool_definitions(
-    knowledge: VersionedKnowledgeBase,
+    knowledge: KnowledgeRepository,
 ) -> list[ToolDefinition]:
     """创建时间、计算和知识检索工具定义。"""
     def current_datetime(

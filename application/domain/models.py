@@ -67,6 +67,18 @@ class TraceEvent:
     error_type: str | None = None
 
 
+@dataclass(frozen=True)
+class SessionEvent:
+    # 事件序号在单次请求内递增，便于重放 SSE 与后续审计。
+    id: int
+    session_id: str
+    request_id: str
+    sequence: int
+    event_type: str
+    payload: dict[str, Any]
+    created_at: str
+
+
 class AgentState(TypedDict, total=False):
     # 请求标识和乐观锁版本：用于解决同一会话的并发状态覆盖问题。
     request_id: str

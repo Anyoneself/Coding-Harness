@@ -27,10 +27,17 @@ class DeepSeekSettings:
     max_tool_output_chars: int = 20000
     max_workspace_file_bytes: int = 1_000_000
     command_timeout_seconds: int = 30
+    database_url: str = "sqlite:///:memory:"
+    milvus_enabled: bool = False
+    milvus_uri: str = "http://127.0.0.1:19530"
+    milvus_token: str = ""
+    milvus_collection: str = "my_agent_knowledge"
+    embedding_dimension: int = 256
 
     @classmethod
     def from_env(cls) -> DeepSeekSettings:
         """从环境变量读取并规范化 My-Agent 运行配置。"""
+        workspace_root = Path(os.environ.get("AGENT_WORKSPACE", Path.cwd())).resolve()
         model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash").strip()
         configured_models = os.environ.get(
             "DEEPSEEK_ALLOWED_MODELS",
@@ -58,7 +65,7 @@ class DeepSeekSettings:
                 int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "8192")),
             ),
             tavily_api_key=os.environ.get("TAVILY_API_KEY", "").strip(),
-            workspace_root=str(Path(os.environ.get("AGENT_WORKSPACE", Path.cwd())).resolve()),
+            workspace_root=str(workspace_root),
             workspace_tools_enabled=_env_flag(
                 "AGENT_ENABLE_WORKSPACE_TOOLS",
                 default=True,
@@ -74,6 +81,21 @@ class DeepSeekSettings:
             command_timeout_seconds=max(
                 1,
                 int(os.environ.get("AGENT_COMMAND_TIMEOUT_SECONDS", "30")),
+            ),
+            database_url=os.environ.get(
+                "DATABASE_URL",
+                "postgresql://my_agent:my_agent@127.0.0.1:5433/my_agent",
+            ).strip(),
+            milvus_enabled=_env_flag("MILVUS_ENABLED", default=True),
+            milvus_uri=os.environ.get("MILVUS_URI", "http://127.0.0.1:19530").strip(),
+            milvus_token=os.environ.get("MILVUS_TOKEN", "").strip(),
+            milvus_collection=os.environ.get(
+                "MILVUS_COLLECTION",
+                "my_agent_knowledge",
+            ).strip(),
+            embedding_dimension=max(
+                32,
+                int(os.environ.get("AGENT_EMBEDDING_DIMENSION", "256")),
             ),
         )
 

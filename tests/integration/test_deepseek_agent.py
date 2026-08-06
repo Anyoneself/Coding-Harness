@@ -3,17 +3,23 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from application.agent import DeepSeekAgent
 from application.app import create_app
-from application.cli.main import build_parser
+from application.cli.main import build_parser, run_chat
 from application.config import DeepSeekSettings
 from application.prompts import AGENT_SYSTEM_PROMPT, INTENT_RECOGNITION_PROMPT
+from application.repositories import SessionStore
+from application.schemas import ChatRequest
+from application.services.chat import AgentChatService
 from application.tools import AgentContext, build_tool_registry
 
 
@@ -52,15 +58,44 @@ def response(
     )
 
 
+def stream_chunk(
+    content: str | None = None,
+    *,
+    tool_calls: list[Any] | None = None,
+    reasoning_content: str | None = None,
+    finish_reason: str | None = None,
+    usage: Any | None = None,
+) -> SimpleNamespace:
+    """构造测试流中的单个模型增量分片。"""
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(
+                    content=content,
+                    reasoning_content=reasoning_content,
+                    tool_calls=tool_calls,
+                ),
+                finish_reason=finish_reason,
+            )
+        ],
+        usage=usage,
+    )
+
+
+def streamed_response(*chunks: SimpleNamespace) -> list[SimpleNamespace]:
+    """把多个模型分片组合成可迭代的测试流。"""
+    return list(chunks)
+
+
 class FakeCompletions:
     """记录调用参数并按顺序返回预设模型响应。"""
 
-    def __init__(self, responses: list[SimpleNamespace]) -> None:
+    def __init__(self, responses: list[Any]) -> None:
         """保存待返回响应和历史调用参数。"""
         self.responses = list(responses)
         self.calls: list[dict[str, Any]] = []
 
-    def create(self, **kwargs: Any) -> SimpleNamespace:
+    def create(self, **kwargs: Any) -> Any:
         """记录一次模型调用并弹出下一个预设响应。"""
         self.calls.append(kwargs)
         return self.responses.pop(0)
@@ -69,7 +104,7 @@ class FakeCompletions:
 class FakeClient:
     """提供与 OpenAI Client 测试所需部分一致的接口。"""
 
-    def __init__(self, responses: list[SimpleNamespace]) -> None:
+    def __init__(self, responses: list[Any]) -> None:
         """创建带有伪补全接口的聊天客户端。"""
         self.chat = SimpleNamespace(completions=FakeCompletions(responses))
 
@@ -94,6 +129,7 @@ class DeepSeekAgentTests(unittest.TestCase):
             "suggested_tools": ["calculate"],
         }
         tool_call = SimpleNamespace(
+            index=0,
             id="call-1",
             function=SimpleNamespace(name="calculate", arguments='{"expression":"128 * 36"}'),
         )
@@ -105,8 +141,14 @@ class DeepSeekAgentTests(unittest.TestCase):
         client = FakeClient(
             [
                 response(json.dumps(intent_payload)),
-                response(tool_calls=[tool_call], finish_reason="tool_calls"),
-                response("结果是 4608。", usage=usage),
+                streamed_response(
+                    stream_chunk(reasoning_content="hidden reasoning"),
+                    stream_chunk(tool_calls=[tool_call], finish_reason="tool_calls"),
+                ),
+                streamed_response(
+                    stream_chunk("结果是 "),
+                    stream_chunk("4608。", finish_reason="stop", usage=usage),
+                ),
             ]
         )
         agent = DeepSeekAgent(self.settings, client=client)
@@ -121,6 +163,15 @@ class DeepSeekAgentTests(unittest.TestCase):
         self.assertEqual("intent", events[1]["type"])
         self.assertEqual(["calculation"], events[1]["intents"])
         self.assertTrue(any(event["type"] == "tool_call" for event in events))
+        self.assertEqual(
+            ["结果是 ", "4608。"],
+            [event["delta"] for event in events if event["type"] == "answer_delta"],
+        )
+        thinking_events = [event for event in events if event["type"] == "thinking_delta"]
+        self.assertEqual(1, len(thinking_events))
+        self.assertEqual(16, thinking_events[0]["delta_chars"])
+        self.assertEqual(16, thinking_events[0]["total_chars"])
+        self.assertEqual("hidden reasoning", thinking_events[0]["delta"])
         tool_result = next(event for event in events if event["type"] == "tool_result")
         self.assertEqual(4608, tool_result["result"]["result"])
         self.assertEqual("结果是 4608。", events[-1]["answer"])
@@ -129,6 +180,8 @@ class DeepSeekAgentTests(unittest.TestCase):
         assistant_tool_message = next(item for item in final_messages if item.get("tool_calls"))
         self.assertIn("reasoning_content", assistant_tool_message)
         self.assertIn("extra_body", client.chat.completions.calls[-1])
+        self.assertNotIn("temperature", client.chat.completions.calls[-1])
+        self.assertTrue(client.chat.completions.calls[-1]["stream"])
         self.assertEqual(
             INTENT_RECOGNITION_PROMPT,
             client.chat.completions.calls[0]["messages"][0]["content"],
@@ -137,6 +190,162 @@ class DeepSeekAgentTests(unittest.TestCase):
             AGENT_SYSTEM_PROMPT,
             client.chat.completions.calls[1]["messages"][0]["content"],
         )
+
+    def test_request_overrides_thinking_mode_and_effort(self) -> None:
+        """验证单次请求可以关闭深度思考或把思考强度切换为 max。"""
+        intent = json.dumps(
+            {
+                "intents": ["question_answering"],
+                "entities": {},
+                "confidence": 0.9,
+                "needs_clarification": False,
+                "clarification_question": "",
+                "suggested_tools": [],
+            }
+        )
+        disabled_client = FakeClient(
+            [response(intent), streamed_response(stream_chunk("快速回答", finish_reason="stop"))]
+        )
+        disabled_agent = DeepSeekAgent(self.settings, client=disabled_client)
+
+        disabled_events = list(disabled_agent.run("快速回答", thinking_enabled=False))
+
+        disabled_payload = disabled_client.chat.completions.calls[-1]
+        self.assertEqual(
+            {"thinking": {"type": "disabled"}},
+            disabled_payload["extra_body"],
+        )
+        self.assertNotIn("reasoning_effort", disabled_payload)
+        self.assertIn("temperature", disabled_payload)
+        self.assertFalse(
+            any(event["type"] == "thinking_delta" for event in disabled_events)
+        )
+
+        max_client = FakeClient(
+            [response(intent), streamed_response(stream_chunk("深入回答", finish_reason="stop"))]
+        )
+        max_agent = DeepSeekAgent(self.settings, client=max_client)
+
+        list(
+            max_agent.run(
+                "深入回答",
+                thinking_enabled=True,
+                reasoning_effort="max",
+            )
+        )
+
+        max_payload = max_client.chat.completions.calls[-1]
+        self.assertEqual({"thinking": {"type": "enabled"}}, max_payload["extra_body"])
+        self.assertEqual("max", max_payload["reasoning_effort"])
+        self.assertNotIn("temperature", max_payload)
+
+    def test_chat_request_validates_thinking_effort(self) -> None:
+        """验证 HTTP 请求只接受 DeepSeek 官方支持的思考强度。"""
+        request = ChatRequest(
+            message="深入分析",
+            session_id="thinking-session",
+            thinking_enabled=True,
+            reasoning_effort="max",
+        )
+
+        self.assertTrue(request.thinking_enabled)
+        self.assertEqual("max", request.reasoning_effort)
+        with self.assertRaises(ValidationError):
+            ChatRequest(
+                message="错误强度",
+                session_id="thinking-session",
+                thinking_enabled=True,
+                reasoning_effort="medium",
+            )
+
+    def test_chat_service_restores_history_and_events_from_sqlite(self) -> None:
+        """验证真实模型服务重建后可恢复历史，并按顺序读取持久化事件。"""
+        intent = json.dumps(
+            {
+                "intents": ["question_answering"],
+                "entities": {},
+                "confidence": 0.9,
+                "needs_clarification": False,
+                "clarification_question": "",
+                "suggested_tools": [],
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "agent.sqlite3")
+            first_client = FakeClient(
+                [
+                    response(intent),
+                    streamed_response(
+                        stream_chunk(reasoning_content="第一轮推理原文"),
+                        stream_chunk("第一轮回答", finish_reason="stop"),
+                    ),
+                ]
+            )
+            first_service = AgentChatService(
+                self.settings,
+                agent=DeepSeekAgent(self.settings, client=first_client),
+                session_store=SessionStore(database),
+            )
+
+            first_events = list(
+                first_service.stream_chat(
+                    "第一轮问题",
+                    user="alice",
+                    role="standard",
+                    session_id="persistent-session",
+                    model=None,
+                )
+            )
+
+            second_client = FakeClient(
+                [
+                    response(intent),
+                    streamed_response(stream_chunk("第二轮回答", finish_reason="stop")),
+                ]
+            )
+            second_store = SessionStore(database)
+            second_service = AgentChatService(
+                self.settings,
+                agent=DeepSeekAgent(self.settings, client=second_client),
+                session_store=second_store,
+            )
+            second_events = list(
+                second_service.stream_chat(
+                    "第二轮问题",
+                    user="alice",
+                    role="standard",
+                    session_id="persistent-session",
+                    model=None,
+                )
+            )
+
+            intent_messages = second_client.chat.completions.calls[0]["messages"]
+            self.assertTrue(
+                any(item.get("content") == "第一轮回答" for item in intent_messages)
+            )
+            self.assertEqual("第一轮回答", first_events[-1]["answer"])
+            self.assertEqual("第二轮回答", second_events[-1]["answer"])
+
+            persisted_events = second_store.list_events("persistent-session")
+            self.assertEqual(11, len(persisted_events))
+            self.assertEqual(
+                [
+                    "started",
+                    "intent",
+                    "model_round",
+                    "thinking_delta",
+                    "answer_delta",
+                    "final",
+                ],
+                [event.event_type for event in persisted_events[:6]],
+            )
+            self.assertEqual(
+                [1, 2, 3, 4, 5, 6],
+                [event.sequence for event in persisted_events[:6]],
+            )
+            thinking_event = persisted_events[3]
+            self.assertNotIn("delta", thinking_event.payload)
+            self.assertTrue(thinking_event.payload["content_redacted"])
 
     def test_disallowed_model_is_rejected_before_api_call(self) -> None:
         """验证非白名单模型会在外部 API 调用前被拒绝。"""
@@ -186,25 +395,43 @@ class DeepSeekAgentTests(unittest.TestCase):
             model="deepseek-v4-flash",
             allowed_models=("deepseek-v4-flash",),
         )
-        client = TestClient(create_app(settings))
+        application = create_app(settings)
+        with TestClient(application) as client:
+            home_response = client.get("/")
+            self.assertEqual(200, home_response.status_code)
+            self.assertIn('id="chatHistory"', home_response.text)
+            self.assertIn('id="activityPanel"', home_response.text)
+            self.assertIn('id="messageInput"', home_response.text)
+            config = client.get("/api/config").json()
+            self.assertFalse(config["ready"])
+            response = client.post(
+                "/api/chat",
+                json={
+                    "message": "hello",
+                    "session_id": "web-test",
+                    "role": "standard",
+                },
+            )
+            self.assertEqual(200, response.status_code)
+            self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+            self.assertEqual("no-cache, no-transform", response.headers["cache-control"])
+            self.assertEqual("no", response.headers["x-accel-buffering"])
+            self.assertIn("DEEPSEEK_API_KEY", response.text)
 
-        home_response = client.get("/")
-        self.assertEqual(200, home_response.status_code)
-        self.assertIn('id="chatHistory"', home_response.text)
-        self.assertIn('id="activityPanel"', home_response.text)
-        self.assertIn('id="messageInput"', home_response.text)
-        config = client.get("/api/config").json()
-        self.assertFalse(config["ready"])
-        response = client.post(
-            "/api/chat",
-            json={
-                "message": "hello",
-                "session_id": "web-test",
-                "role": "standard",
-            },
-        )
-        self.assertEqual(200, response.status_code)
-        self.assertIn("DEEPSEEK_API_KEY", response.text)
+        session_store = application.state.chat_service.session_store
+        self.assertIsNone(session_store._connection)
+
+    def test_web_app_shutdown_closes_chat_service_once(self) -> None:
+        """验证应用生命周期结束时主动关闭服务，避免解释器退出阶段回收连接池。"""
+        service = Mock(spec=AgentChatService)
+        service.is_ready = False
+        service.get_public_config.return_value = {"ready": False}
+        application = create_app(DeepSeekSettings(api_key=""), chat_service=service)
+
+        with TestClient(application) as client:
+            self.assertEqual(200, client.get("/api/health").status_code)
+
+        service.close.assert_called_once_with()
 
     def test_codex_style_workspace_tools_are_registered(self) -> None:
         """验证工作区读写和命令工具均已显式注册。"""
@@ -393,6 +620,36 @@ class DeepSeekAgentTests(unittest.TestCase):
         self.assertEqual("serve", arguments.command)
         self.assertEqual("0.0.0.0", arguments.host)
         self.assertEqual(9000, arguments.port)
+
+    def test_cli_chat_reuses_service_and_emits_json_lines(self) -> None:
+        """验证 CLI chat 复用对话服务，并输出机器可消费的 JSON Lines。"""
+        service = Mock(spec=AgentChatService)
+        service.stream_chat.return_value = iter(
+            [
+                {"type": "started", "request_id": "request-1"},
+                {"type": "final", "request_id": "request-1", "answer": "完成"},
+            ]
+        )
+        arguments = build_parser().parse_args(
+            ["chat", "检查项目", "--session", "cli-session", "--json"]
+        )
+        output = StringIO()
+
+        exit_code = run_chat(arguments, service=service, output=output)
+
+        self.assertEqual(0, exit_code)
+        service.stream_chat.assert_called_once_with(
+            "检查项目",
+            user="cli-user",
+            role="standard",
+            session_id="cli-session",
+            model=None,
+            thinking_enabled=None,
+            reasoning_effort=None,
+        )
+        lines = output.getvalue().splitlines()
+        self.assertEqual("started", json.loads(lines[0])["type"])
+        self.assertEqual("完成", json.loads(lines[1])["answer"])
 
 
 if __name__ == "__main__":

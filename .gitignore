@@ -4,6 +4,7 @@
 !.env.example
 .idea/
 .mini-agent-memory.jsonl
+.my-agent/
 .ruff_cache/
 .venv/
 __pycache__/

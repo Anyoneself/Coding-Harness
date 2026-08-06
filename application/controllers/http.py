@@ -57,6 +57,8 @@ def create_api_router(chat_service: AgentChatService) -> APIRouter:
                     role=payload.role,
                     session_id=payload.session_id,
                     model=payload.model,
+                    thinking_enabled=payload.thinking_enabled,
+                    reasoning_effort=payload.reasoning_effort,
                 ):
                     yield encode_sse(event)
             except Exception as exc:
@@ -65,7 +67,11 @@ def create_api_router(chat_service: AgentChatService) -> APIRouter:
         return StreamingResponse(
             generate_events(),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     @router.post("/session/reset")

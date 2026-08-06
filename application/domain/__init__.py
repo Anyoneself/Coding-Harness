@@ -1,6 +1,14 @@
 """领域模型与规则。"""
 
-from .models import AgentState, IntentResult, Message, RetrievalHit, ToolResult, TraceEvent
+from .models import (
+    AgentState,
+    IntentResult,
+    Message,
+    RetrievalHit,
+    SessionEvent,
+    ToolResult,
+    TraceEvent,
+)
 from .policies import ContextManager, ExecutionGuard, LoopDetectedError
 
 __all__ = [
@@ -11,6 +19,7 @@ __all__ = [
     "LoopDetectedError",
     "Message",
     "RetrievalHit",
+    "SessionEvent",
     "ToolResult",
     "TraceEvent",
 ]

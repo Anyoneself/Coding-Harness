@@ -9,6 +9,15 @@ const state = {
   rounds: 0,
   assistantNode: null,
   assistantPersisted: false,
+  streamedAnswer: "",
+  answerQueue: [],
+  answerPlayback: null,
+  answerPlaybackToken: 0,
+  thinkingEnabled: false,
+  reasoningEffort: null,
+  thinkingChars: 0,
+  reasoningText: "",
+  reasoningNode: null,
   chats: [],
   activeChatId: "",
 };
@@ -23,14 +32,13 @@ const elements = {
   messageList: document.querySelector("#messageList"),
   newTask: document.querySelector("#newTaskButton"),
   taskTitle: document.querySelector("#taskTitle"),
-  roleSelect: document.querySelector("#roleSelect"),
   modelSelect: document.querySelector("#modelSelect"),
+  thinkingSelect: document.querySelector("#thinkingSelect"),
   runStatus: document.querySelector("#runStatus"),
   configBanner: document.querySelector("#configBanner"),
   sidebarStatusDot: document.querySelector("#sidebarStatusDot"),
   sidebarStatusText: document.querySelector("#sidebarStatusText"),
   toolList: document.querySelector("#toolList"),
-  thinkingMode: document.querySelector("#thinkingMode"),
   activityPanel: document.querySelector("#activityPanel"),
   activityToggle: document.querySelector("#activityToggle"),
   closeActivity: document.querySelector("#closeActivity"),
@@ -167,6 +175,8 @@ function resizeInput() {
 function setRunning(running) {
   state.running = running;
   elements.input.disabled = running;
+  elements.modelSelect.disabled = running;
+  elements.thinkingSelect.disabled = running;
   elements.sendButton.classList.toggle("running", running);
   elements.sendIcon.textContent = running ? "■" : "↑";
   elements.sendButton.title = running ? "停止" : "发送";
@@ -198,8 +208,143 @@ function showConversation() {
   elements.emptyState.classList.add("hidden");
 }
 
+/** 把受支持的 Markdown 行内语法转换为安全 DOM 节点。 */
+function appendInlineMarkdown(container, content) {
+  const pattern = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let cursor = 0;
+  for (const match of content.matchAll(pattern)) {
+    if (match.index > cursor) {
+      container.append(document.createTextNode(content.slice(cursor, match.index)));
+    }
+    if (match[1] !== undefined) {
+      const code = document.createElement("code");
+      code.textContent = match[1];
+      container.append(code);
+    } else if (match[2] !== undefined) {
+      const strong = document.createElement("strong");
+      strong.textContent = match[2];
+      container.append(strong);
+    } else if (match[3] !== undefined) {
+      const emphasis = document.createElement("em");
+      emphasis.textContent = match[3];
+      container.append(emphasis);
+    } else {
+      const link = document.createElement("a");
+      link.textContent = match[4];
+      link.href = match[5];
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      container.append(link);
+    }
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < content.length) {
+    container.append(document.createTextNode(content.slice(cursor)));
+  }
+}
+
+/** 将基础 Markdown 块语法渲染到消息节点，不执行模型提供的 HTML。 */
+function renderMarkdown(container, content) {
+  container.replaceChildren();
+  const lines = String(content || "").replace(/\r\n/g, "\n").split("\n");
+  let codeBlock = null;
+  let activeList = null;
+  let activeListType = "";
+
+  for (const line of lines) {
+    const fence = line.match(/^\s*```/);
+    if (fence) {
+      activeList = null;
+      activeListType = "";
+      if (codeBlock) {
+        codeBlock = null;
+      } else {
+        const pre = document.createElement("pre");
+        codeBlock = document.createElement("code");
+        pre.append(codeBlock);
+        container.append(pre);
+      }
+      continue;
+    }
+
+    if (codeBlock) {
+      codeBlock.textContent += `${codeBlock.textContent ? "\n" : ""}${line}`;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    const unorderedItem = line.match(/^\s*[-+*]\s+(.+)$/);
+    const orderedItem = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    const quote = line.match(/^\s*>\s?(.*)$/);
+
+    if (heading) {
+      activeList = null;
+      activeListType = "";
+      const headingNode = document.createElement(`h${heading[1].length}`);
+      appendInlineMarkdown(headingNode, heading[2]);
+      container.append(headingNode);
+      continue;
+    }
+
+    if (unorderedItem || orderedItem) {
+      const listType = unorderedItem ? "ul" : "ol";
+      if (!activeList || activeListType !== listType) {
+        activeList = document.createElement(listType);
+        activeListType = listType;
+        container.append(activeList);
+      }
+      const item = document.createElement("li");
+      appendInlineMarkdown(item, (unorderedItem || orderedItem)[1]);
+      activeList.append(item);
+      continue;
+    }
+
+    activeList = null;
+    activeListType = "";
+    if (quote) {
+      const quoteNode = document.createElement("blockquote");
+      appendInlineMarkdown(quoteNode, quote[1]);
+      container.append(quoteNode);
+      continue;
+    }
+    if (!line) {
+      const spacer = document.createElement("div");
+      spacer.className = "markdown-spacer";
+      container.append(spacer);
+      continue;
+    }
+    const paragraph = document.createElement("div");
+    paragraph.className = "markdown-paragraph";
+    appendInlineMarkdown(paragraph, line);
+    container.append(paragraph);
+  }
+}
+
+/** 创建明确标注为模型生成内容的可折叠深度思考区域。 */
+function createReasoningPanel(content, effort = "high") {
+  const details = document.createElement("details");
+  details.className = "reasoning-panel";
+  details.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = `DeepSeek 深度思考 · ${effort}`;
+  const notice = document.createElement("div");
+  notice.className = "reasoning-notice";
+  notice.textContent = "以下为模型生成的思考过程，可能存在错误。";
+  const reasoningContent = document.createElement("div");
+  reasoningContent.className = "reasoning-content";
+  reasoningContent.textContent = content;
+  details.append(summary, notice, reasoningContent);
+  return { details, summary, content: reasoningContent };
+}
+
 /** 构建一条用户或助手消息节点。 */
-function createMessageNode(role, content, pending = false) {
+function createMessageNode(
+  role,
+  content,
+  pending = false,
+  reasoningContent = "",
+  reasoningEffort = "high",
+) {
   const article = document.createElement("article");
   article.className = `message ${role}`;
 
@@ -227,17 +372,28 @@ function createMessageNode(role, content, pending = false) {
     dots.className = "thinking-dots";
     dots.innerHTML = "<span></span><span></span><span></span>";
     const label = document.createElement("span");
+    label.className = "thinking-label";
     label.textContent = content;
     text.append(dots, label);
   } else {
-    text.textContent = content;
+    if (role === "assistant") {
+      renderMarkdown(text, content);
+    } else {
+      text.textContent = content;
+    }
   }
 
   const meta = document.createElement("div");
   meta.className = "message-meta";
-  body.append(heading, text, meta);
+  body.append(heading);
+  let reasoning = null;
+  if (role === "assistant" && reasoningContent) {
+    reasoning = createReasoningPanel(reasoningContent, reasoningEffort);
+    body.append(reasoning.details);
+  }
+  body.append(text, meta);
   article.append(body);
-  return { article, text, meta };
+  return { article, body, text, meta, reasoning };
 }
 
 /** 将消息写入当前对话，并按需持久化到本地历史。 */
@@ -268,7 +424,12 @@ function persistAssistantMessage(content) {
   if (state.assistantPersisted) return;
   const chat = activeChat();
   if (!chat) return;
-  chat.messages.push({ role: "assistant", content });
+  const message = { role: "assistant", content };
+  if (state.reasoningText) {
+    message.reasoning_content = state.reasoningText;
+    message.reasoning_effort = state.reasoningEffort || "high";
+  }
+  chat.messages.push(message);
   chat.updatedAt = Date.now();
   state.assistantPersisted = true;
   persistChats();
@@ -281,12 +442,91 @@ function updateAssistant(content, isError = false) {
     state.assistantNode = addMessage("assistant", content, { persist: false });
   } else {
     state.assistantNode.text.classList.remove("pending");
-    state.assistantNode.text.replaceChildren();
-    state.assistantNode.text.textContent = content;
+    renderMarkdown(state.assistantNode.text, content);
   }
   state.assistantNode.text.classList.toggle("error-text", isError);
   persistAssistantMessage(content);
   elements.conversation.scrollTop = elements.conversation.scrollHeight;
+}
+
+/** 等待指定毫秒数，让浏览器在两个字符之间完成绘制。 */
+function waitForCharacterInterval(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/** 把一个字符追加到当前回答，保持滚动位置跟随最新内容。 */
+function appendAssistantCharacter(character) {
+  if (!state.assistantNode) {
+    state.assistantNode = addMessage("assistant", "", { persist: false });
+  }
+  if (!state.streamedAnswer) {
+    state.assistantNode.text.classList.remove("pending");
+    state.assistantNode.text.replaceChildren();
+  }
+  state.streamedAnswer += character;
+  renderMarkdown(state.assistantNode.text, state.streamedAnswer);
+  elements.conversation.scrollTop = elements.conversation.scrollHeight;
+}
+
+/** 按固定节奏播放已接收字符，避免快速到达的分片成批渲染。 */
+async function playAssistantQueue(playbackToken) {
+  while (state.answerQueue.length && playbackToken === state.answerPlaybackToken) {
+    const character = state.answerQueue.shift();
+    appendAssistantCharacter(character);
+    await waitForCharacterInterval(20);
+  }
+}
+
+/** 在播放器空闲且队列有内容时启动逐字播放。 */
+function startAssistantPlayback() {
+  if (state.answerPlayback || !state.answerQueue.length) return;
+  const playbackToken = state.answerPlaybackToken;
+  state.answerPlayback = playAssistantQueue(playbackToken).finally(() => {
+    if (playbackToken !== state.answerPlaybackToken) return;
+    state.answerPlayback = null;
+    startAssistantPlayback();
+  });
+}
+
+/** 将公开回答分片放入独立播放队列，不阻塞网络流继续读取。 */
+function enqueueAssistantDelta(delta) {
+  if (!delta) return;
+  state.answerQueue.push(...Array.from(delta));
+  startAssistantPlayback();
+}
+
+/** 等待已经接收的字符全部显示后再处理最终事件。 */
+async function waitForAssistantPlayback() {
+  while (state.answerPlayback) {
+    await state.answerPlayback;
+  }
+}
+
+/** 停止旧回答的字符播放并清空尚未显示的内容。 */
+function resetAssistantPlayback() {
+  state.answerPlaybackToken += 1;
+  state.answerQueue = [];
+  state.answerPlayback = null;
+  state.streamedAnswer = "";
+  state.reasoningText = "";
+  state.reasoningNode = null;
+}
+
+/** 更新等待状态文案，同时保留正在跳动的思考指示器。 */
+function updatePendingAssistant(label) {
+  if (!state.assistantNode?.text.classList.contains("pending")) return;
+  const labelNode = state.assistantNode.text.querySelector(".thinking-label");
+  if (labelNode) labelNode.textContent = label;
+}
+
+/** 获取或创建当前回答的深度思考面板。 */
+function ensureReasoningPanel() {
+  if (state.reasoningNode) return state.reasoningNode;
+  if (!state.assistantNode) return null;
+  const reasoning = createReasoningPanel("", state.reasoningEffort || "high");
+  state.assistantNode.body.insertBefore(reasoning.details, state.assistantNode.text);
+  state.reasoningNode = reasoning;
+  return reasoning;
 }
 
 /** 为当前助手消息添加简短运行元数据。 */
@@ -350,12 +590,41 @@ function addActivity(kind, title, body = "", tags = [], details = null) {
   return item;
 }
 
-/** 根据服务端事件更新对话、状态和 Trace。 */
-function handleAgentEvent(event) {
+/** 根据服务端事件按到达顺序更新对话、状态和 Trace。 */
+async function handleAgentEvent(event) {
   switch (event.type) {
     case "started":
+      state.thinkingEnabled = Boolean(event.thinking_enabled);
+      state.reasoningEffort = event.reasoning_effort || null;
+      state.thinkingChars = 0;
       setStatus(`请求 ${event.request_id.slice(0, 8)} · ${event.model}`, "Running");
-      addActivity("model", "任务已开始", event.model, ["request"]);
+      addActivity(
+        "model",
+        "任务已开始",
+        event.model,
+        [
+          "request",
+          event.thinking_enabled
+            ? `thinking:${event.reasoning_effort || "high"}`
+            : "thinking:disabled",
+        ],
+      );
+      break;
+    case "thinking_delta":
+      const reasoningDelta = String(event.delta || "");
+      state.reasoningText += reasoningDelta;
+      state.thinkingChars += Number(event.delta_chars || Array.from(reasoningDelta).length);
+      const reasoningPanel = ensureReasoningPanel();
+      if (reasoningPanel) {
+        reasoningPanel.content.textContent = state.reasoningText;
+        reasoningPanel.summary.textContent =
+          `DeepSeek 深度思考 · ${state.reasoningEffort || "high"} · ${state.thinkingChars} 字符`;
+      }
+      updatePendingAssistant(
+        `正在深度思考 · ${state.reasoningEffort || "high"} · ${state.thinkingChars} 字符`,
+      );
+      setStatus(`DeepSeek 正在深度思考 · ${state.thinkingChars} 字符`, "Thinking");
+      elements.conversation.scrollTop = elements.conversation.scrollHeight;
       break;
     case "intent": {
       const confidence = Math.round((event.confidence || 0) * 100);
@@ -398,10 +667,22 @@ function handleAgentEvent(event) {
       addMeta(`${event.name}:${status}`);
       break;
     }
+    case "answer_delta":
+      enqueueAssistantDelta(event.delta || "");
+      setStatus("DeepSeek 正在生成回答", "Streaming");
+      break;
     case "final": {
-      updateAssistant(event.answer);
+      await waitForAssistantPlayback();
+      const finalAnswer = event.answer || state.streamedAnswer;
+      state.streamedAnswer = finalAnswer;
+      updateAssistant(finalAnswer);
       const totalTokens = event.usage?.total_tokens;
       if (totalTokens) addMeta(`${totalTokens} tokens`);
+      if (state.thinkingEnabled) {
+        addMeta(
+          `深度思考 · ${state.reasoningEffort || "high"} · ${state.thinkingChars} 字符`,
+        );
+      }
       addMeta(`${state.rounds} rounds`);
       addActivity(
         "final",
@@ -414,6 +695,7 @@ function handleAgentEvent(event) {
       break;
     }
     case "error":
+      resetAssistantPlayback();
       updateAssistant(event.message || "任务执行失败。", true);
       addActivity("error", "任务失败", event.message || "未知错误");
       setStatus("执行失败", "Error");
@@ -456,14 +738,14 @@ async function consumeEventStream(response) {
     buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
     const blocks = buffer.split("\n\n");
     buffer = blocks.pop() || "";
-    blocks.forEach((block) => {
+    for (const block of blocks) {
       const event = parseEventBlock(block);
-      if (event) handleAgentEvent(event);
-    });
+      if (event) await handleAgentEvent(event);
+    }
   }
   if (buffer.trim()) {
     const event = parseEventBlock(buffer);
-    if (event) handleAgentEvent(event);
+    if (event) await handleAgentEvent(event);
   }
 }
 
@@ -479,8 +761,14 @@ async function sendTask(message) {
   clearActivity();
   state.assistantNode = null;
   state.assistantPersisted = false;
+  resetAssistantPlayback();
   addMessage("user", message);
-  state.assistantNode = addMessage("assistant", "正在思考", { pending: true, persist: false });
+  const isThinkingEnabled = elements.thinkingSelect.value !== "disabled";
+  state.assistantNode = addMessage(
+    "assistant",
+    isThinkingEnabled ? "正在深度思考" : "正在生成回答",
+    { pending: true, persist: false },
+  );
   elements.input.value = "";
   resizeInput();
   setRunning(true);
@@ -495,14 +783,20 @@ async function sendTask(message) {
       body: JSON.stringify({
         message,
         session_id: state.sessionId,
-        role: elements.roleSelect.value,
+        role: "standard",
         model: elements.modelSelect.value,
+        thinking_enabled: elements.thinkingSelect.value !== "disabled",
+        reasoning_effort:
+          elements.thinkingSelect.value === "disabled"
+            ? null
+            : elements.thinkingSelect.value,
       }),
       signal: state.controller.signal,
     });
     await consumeEventStream(response);
   } catch (error) {
     if (error.name === "AbortError") {
+      resetAssistantPlayback();
       updateAssistant("任务已在当前页面停止。 ");
       addActivity("error", "任务已停止", "客户端终止了事件流");
       setStatus("已停止", "Stopped");
@@ -525,6 +819,7 @@ function renderActiveChat() {
   elements.messageList.replaceChildren();
   state.assistantNode = null;
   state.assistantPersisted = false;
+  resetAssistantPlayback();
   elements.taskTitle.textContent = chat?.title || "新对话";
   setStatus(chat?.status || "准备就绪", "Idle");
 
@@ -535,7 +830,13 @@ function renderActiveChat() {
 
   elements.emptyState.classList.add("hidden");
   chat.messages.forEach((message) => {
-    const node = createMessageNode(message.role, message.content);
+    const node = createMessageNode(
+      message.role,
+      message.content,
+      false,
+      message.reasoning_content || "",
+      message.reasoning_effort || "high",
+    );
     elements.messageList.append(node.article);
   });
   elements.conversation.scrollTop = elements.conversation.scrollHeight;
@@ -617,9 +918,15 @@ async function loadConfig() {
       pill.title = tool;
       elements.toolList.append(pill);
     });
-    elements.thinkingMode.textContent = state.config.thinking_enabled
-      ? `深度思考 · ${state.config.reasoning_effort}`
-      : "深度思考 · 已关闭";
+    const supportedEfforts = Array.isArray(state.config.reasoning_efforts)
+      ? state.config.reasoning_efforts
+      : ["low", "high", "max"];
+    const configuredEffort = supportedEfforts.includes(state.config.reasoning_effort)
+      ? state.config.reasoning_effort
+      : "high";
+    elements.thinkingSelect.value = state.config.thinking_enabled
+      ? configuredEffort
+      : "disabled";
     elements.sidebarStatusDot.className = `status-dot ${state.config.ready ? "ready" : "error"}`;
     elements.sidebarStatusText.textContent = state.config.ready
       ? "DeepSeek 已连接"

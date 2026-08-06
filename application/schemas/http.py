@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -13,6 +15,8 @@ class ChatRequest(BaseModel):
     user: str = Field(default="web-user", min_length=1, max_length=128)
     role: str = Field(default="standard", min_length=1, max_length=64)
     model: str | None = None
+    thinking_enabled: bool | None = None
+    reasoning_effort: Literal["low", "high", "max"] | None = None
 
 
 class ResetSessionRequest(BaseModel):

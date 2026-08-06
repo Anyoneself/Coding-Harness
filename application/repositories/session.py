@@ -6,13 +6,54 @@ import json
 import sqlite3
 import threading
 from collections.abc import Callable
-from typing import Any
+from pathlib import Path
+from typing import Any, Protocol
 
-from ..domain.models import ToolResult
+from ..domain.models import SessionEvent, ToolResult
 
 
 class ConcurrentUpdateError(RuntimeError):
     """保存会话时发现版本已过期，说明存在并发更新。"""
+
+
+class SessionRepository(Protocol):
+    """定义真实模型服务依赖的会话与事件持久化契约。"""
+
+    def load(self, session_id: str) -> tuple[int, dict[str, Any]]:
+        """读取会话版本和状态。"""
+        ...
+
+    def save(self, session_id: str, expected_version: int, state: dict[str, Any]) -> int:
+        """使用乐观锁保存会话状态。"""
+        ...
+
+    def delete_session(self, session_id: str) -> None:
+        """删除会话上下文但保留审计事件。"""
+        ...
+
+    def append_event(
+        self,
+        *,
+        session_id: str,
+        request_id: str,
+        sequence: int,
+        event: dict[str, Any],
+    ) -> int:
+        """追加一个结构化执行事件。"""
+        ...
+
+    def list_events(
+        self,
+        session_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> list[SessionEvent]:
+        """按写入顺序读取结构化执行事件。"""
+        ...
+
+    def close(self) -> None:
+        """关闭仓储持有的数据库连接资源。"""
+        ...
 
 
 class SessionStore:
@@ -20,6 +61,8 @@ class SessionStore:
 
     def __init__(self, database: str = ":memory:") -> None:
         """初始化会话表，并创建线程安全的数据库访问锁。"""
+        if database != ":memory:" and not database.startswith("file:"):
+            Path(database).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(database, check_same_thread=False, isolation_level=None)
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute(
@@ -29,6 +72,26 @@ class SessionStore:
                 version INTEGER NOT NULL,
                 state_json TEXT NOT NULL
             )
+            """
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(request_id, sequence)
+            )
+            """
+        )
+        self._connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_events_session_id
+            ON agent_events(session_id, id)
             """
         )
         self._lock = threading.RLock()
@@ -60,6 +123,74 @@ class SessionStore:
             except Exception:
                 self._connection.execute("ROLLBACK")
                 raise
+
+    def delete_session(self, session_id: str) -> None:
+        """删除指定会话上下文，同时保留事件用于审计和问题追踪。"""
+        with self._lock:
+            self._connection.execute(
+                "DELETE FROM agent_sessions WHERE session_id = ?",
+                (session_id,),
+            )
+
+    def append_event(
+        self,
+        *,
+        session_id: str,
+        request_id: str,
+        sequence: int,
+        event: dict[str, Any],
+    ) -> int:
+        """按请求内序号持久化一个结构化 Agent 事件，并返回事件主键。"""
+        event_type = str(event.get("type") or "message")
+        payload = json.dumps(event, ensure_ascii=False, sort_keys=True)
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO agent_events(
+                    session_id, request_id, sequence, event_type, payload_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (session_id, request_id, sequence, event_type, payload),
+            )
+            return int(cursor.lastrowid)
+
+    def list_events(
+        self,
+        session_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> list[SessionEvent]:
+        """按写入顺序读取指定会话或单次请求的结构化事件。"""
+        query = (
+            "SELECT id, session_id, request_id, sequence, event_type, payload_json, created_at "
+            "FROM agent_events WHERE session_id = ?"
+        )
+        parameters: tuple[str, ...] = (session_id,)
+        if request_id is not None:
+            query += " AND request_id = ?"
+            parameters = (session_id, request_id)
+        query += " ORDER BY id"
+        with self._lock:
+            rows = self._connection.execute(query, parameters).fetchall()
+        return [
+            SessionEvent(
+                id=int(row[0]),
+                session_id=str(row[1]),
+                request_id=str(row[2]),
+                sequence=int(row[3]),
+                event_type=str(row[4]),
+                payload=json.loads(row[5]),
+                created_at=str(row[6]),
+            )
+            for row in rows
+        ]
+
+    def close(self) -> None:
+        """幂等关闭 SQLite 数据库连接。"""
+        with self._lock:
+            if self._connection is not None:
+                self._connection.close()
+                self._connection = None
 
     def _save_in_transaction(
         self,
