@@ -34,11 +34,13 @@ class PostgresSessionStoreTests(unittest.TestCase):
         version, state = second_store.load(session_id)
         events = second_store.list_events(session_id)
         second_store.delete_session(session_id)
+        deleted_events = second_store.list_events(session_id)
         second_store.close()
 
         self.assertEqual(1, version)
         self.assertEqual([], state["messages"])
         self.assertEqual("started", events[0].event_type)
+        self.assertEqual([], deleted_events)
 
 
 @unittest.skipUnless(os.environ.get("MILVUS_TEST_URI"), "未配置 Milvus 集成测试")

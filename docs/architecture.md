@@ -148,7 +148,7 @@ CLI 与 Web 共用 `application.app`，不得建立独立业务链路。
 
 负责 HTTP 与 SSE 协议转换。
 
-- `http.py`：注册 `/api/config`、`/api/chat`、`/api/session/reset` 和 `/api/health`；编码 SSE；转换外部模型异常。
+- `http.py`：注册对话、配置、健康检查、会话重置和永久删除接口；编码 SSE；转换外部模型异常。
 
 Controller 不直接访问 Repository，也不实现模型循环和写操作规则。
 
@@ -202,7 +202,7 @@ Repository 对 Service 提供业务语义方法，不向上层暴露 SQL 或索�
 
 负责应用用例编排。
 
-- `chat.py`：创建和管理 `DeepSeekAgent`，提供对话、会话重置和公开配置用例。
+- `chat.py`：创建和管理 `DeepSeekAgent`，提供对话、会话重置、永久删除和公开配置用例。
 - `local_agent.py`：本地确定性 Agent 全流程编排。
 - `evaluation.py`：阶段评分、失败归因、双向 Judge 和 Bootstrap 版本比较。
 - `__init__.py`：保持轻量，避免聚合导出导致循环依赖。
@@ -215,7 +215,7 @@ Service 可以协调多个 Repository 和领域规则，但不能依赖 FastAPI 
 
 - `index.html`：页面结构和可访问性标签。
 - `styles.css`：工作台布局与视觉样式。
-- `app.js`：会话状态、SSE 解析、消息渲染、工具事件、配置加载和本地会话历史。
+- `app.js`：会话状态、SSE 解析、消息渲染、工具事件、配置加载以及本地会话切换和删除。
 
 当前布局采用左侧会话栏、中央对话区和右侧 Trace 抽屉。Trace 默认关闭；移动端左侧会话栏也默认收起。会话标题和消息保存在浏览器本地存储中，服务端仍以对应 `session_id` 隔离模型上下文。
 
@@ -273,7 +273,7 @@ Agent 工作区工具的默认示例目录。该目录中的文件是工具操�
 ## 7. 状态、存储与缓存
 
 - 真实模型会话：默认保存在本地 Docker PostgreSQL，Web 与 CLI 使用相同仓储契约，重启后可以继续上下文。
-- 真实模型事件：按会话、请求 ID 和请求内序号写入 PostgreSQL JSONB；清理上下文时保留事件用于审计。
+- 真实模型事件：按会话、请求 ID 和请求内序号写入 PostgreSQL JSONB；重置上下文时保留事件，永久删除会话时同步删除事件。
 - 真实模型知识：默认写入 Milvus Standalone；集合首次使用时自动建立，并写入当前默认知识文档。
 - 本地机制会话：默认使用内存 SQLite，也可以向 `SessionStore` 传入数据库路径。
 - 幂等记录：当前为进程内存实现，适合测试和单进程演示。

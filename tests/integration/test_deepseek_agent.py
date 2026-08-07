@@ -402,6 +402,9 @@ class DeepSeekAgentTests(unittest.TestCase):
             self.assertIn('id="chatHistory"', home_response.text)
             self.assertIn('id="activityPanel"', home_response.text)
             self.assertIn('id="messageInput"', home_response.text)
+            favicon_response = client.get("/favicon.ico")
+            self.assertEqual(200, favicon_response.status_code)
+            self.assertTrue(favicon_response.headers["content-type"].startswith("image/svg+xml"))
             config = client.get("/api/config").json()
             self.assertFalse(config["ready"])
             response = client.post(
@@ -417,6 +420,15 @@ class DeepSeekAgentTests(unittest.TestCase):
             self.assertEqual("no-cache, no-transform", response.headers["cache-control"])
             self.assertEqual("no", response.headers["x-accel-buffering"])
             self.assertIn("DEEPSEEK_API_KEY", response.text)
+            delete_response = client.delete("/api/session/web-test")
+            self.assertEqual(200, delete_response.status_code)
+            self.assertEqual({"ok": True}, delete_response.json())
+            self.assertEqual(
+                [],
+                application.state.chat_service.get_session_events("web-test"),
+            )
+            self.assertEqual(200, client.delete("/api/session/web-test").status_code)
+            self.assertEqual(422, client.delete(f"/api/session/{'x' * 129}").status_code)
 
         session_store = application.state.chat_service.session_store
         self.assertIsNone(session_store._connection)

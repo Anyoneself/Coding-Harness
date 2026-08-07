@@ -81,6 +81,26 @@ services:
       timeout: 10s
       retries: 20
 
+  attu:
+    container_name: my-agent-milvus-attu
+    image: zilliz/attu:v2.4.12
+    environment:
+      MILVUS_URL: milvus:19530
+    ports:
+      - "127.0.0.1:${ATTU_PORT:-3000}:3000"
+    depends_on:
+      milvus:
+        condition: service_healthy
+
+  etcdkeeper:
+    container_name: my-agent-etcdkeeper
+    image: evildecay/etcdkeeper:latest
+    ports:
+      - "127.0.0.1:${ETCDKEEPER_PORT:-8080}:8080"
+    depends_on:
+      etcd:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   milvus-etcd-data:

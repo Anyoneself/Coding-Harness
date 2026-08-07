@@ -27,8 +27,12 @@ class SessionRepository(Protocol):
         """使用乐观锁保存会话状态。"""
         ...
 
+    def clear_session_context(self, session_id: str) -> None:
+        """清理会话上下文但保留审计事件。"""
+        ...
+
     def delete_session(self, session_id: str) -> None:
-        """删除会话上下文但保留审计事件。"""
+        """永久删除会话上下文和全部审计事件。"""
         ...
 
     def append_event(
@@ -124,13 +128,31 @@ class SessionStore:
                 self._connection.execute("ROLLBACK")
                 raise
 
-    def delete_session(self, session_id: str) -> None:
-        """删除指定会话上下文，同时保留事件用于审计和问题追踪。"""
+    def clear_session_context(self, session_id: str) -> None:
+        """清理指定会话上下文，同时保留事件用于审计和问题追踪。"""
         with self._lock:
             self._connection.execute(
                 "DELETE FROM agent_sessions WHERE session_id = ?",
                 (session_id,),
             )
+
+    def delete_session(self, session_id: str) -> None:
+        """在单个事务中永久删除指定会话及其全部审计事件。"""
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._connection.execute(
+                    "DELETE FROM agent_events WHERE session_id = ?",
+                    (session_id,),
+                )
+                self._connection.execute(
+                    "DELETE FROM agent_sessions WHERE session_id = ?",
+                    (session_id,),
+                )
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
 
     def append_event(
         self,

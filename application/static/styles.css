@@ -11,7 +11,7 @@ button:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-v
 .new-chat-button { display:flex; width:100%; min-height:58px; align-items:center; justify-content:center; gap:10px; margin-top:25px; padding:0 15px; border:1px solid #e6e8ed; border-radius:30px; background:var(--surface); box-shadow:0 2px 4px rgba(35,43,65,.08); font-size:18px; font-weight:610; } .new-chat-button svg { width:22px; height:22px; } .new-chat-button:hover { border-color:#cfd5df; background:#fdfdff; }
 .history-section { min-height:0; flex:1; margin-top:33px; overflow:hidden; } .chat-history { height:100%; padding:0 3px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#d9dde5 transparent; }
 .history-group-label { margin:0 11px 12px; color:#9298a4; font-size:16px; font-weight:500; } .history-group-label:not(:first-child) { margin-top:30px; }
-.history-item { display:grid; width:100%; min-height:54px; gap:3px; padding:10px 12px; border:0; border-radius:9px; background:transparent; text-align:left; } .history-item:hover { background:#f0f2f6; } .history-item.active { background:#e9edff; } .history-item strong,.history-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .history-item strong { font-size:17px; font-weight:470; } .history-item small { color:var(--muted); font-size:11px; } .empty-history { margin:18px 11px; color:var(--muted); font-size:13px; }
+.history-item-row { display:grid; grid-template-columns:minmax(0,1fr) 30px; align-items:center; gap:2px; } .history-item { display:grid; width:100%; min-width:0; min-height:54px; gap:3px; padding:10px 12px; border:0; border-radius:9px; background:transparent; text-align:left; } .history-item:hover { background:#f0f2f6; } .history-item.active { background:#e9edff; } .history-item strong,.history-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .history-item strong { font-size:17px; font-weight:470; } .history-item small { color:var(--muted); font-size:11px; } .history-delete-button { display:grid; width:28px; height:28px; place-items:center; padding:0; border:0; border-radius:8px; background:transparent; color:#9aa2b1; opacity:0; transition:opacity 120ms ease,background 120ms ease,color 120ms ease; } .history-delete-button svg { width:17px; height:17px; } .history-item-row:hover .history-delete-button,.history-delete-button:focus-visible { opacity:1; } .history-delete-button:hover { background:#fff0f0; color:#d14343; } .history-delete-button:disabled { cursor:not-allowed; opacity:0; } .empty-history { margin:18px 11px; color:var(--muted); font-size:13px; }
 .sidebar-footer { display:grid; gap:12px; padding:13px 7px 4px; border-top:1px solid var(--line); } .tools-disclosure summary,.connection-state { color:var(--muted); font-size:12px; } .tools-disclosure summary { cursor:pointer; } .tool-list { display:flex; max-height:92px; flex-wrap:wrap; gap:5px; margin-top:8px; overflow:auto; } .tool-pill { max-width:100%; padding:4px 6px; overflow:hidden; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--text-soft); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; text-overflow:ellipsis; white-space:nowrap; } .connection-state { display:flex; align-items:center; gap:7px; } .status-dot { width:7px; height:7px; border-radius:50%; background:var(--warning); } .status-dot.ready { background:var(--success); } .status-dot.error { background:var(--danger); }
 .sidebar-scrim,.trace-backdrop { position:fixed; inset:0; z-index:20; display:none; padding:0; border:0; background:rgba(28,31,40,.24); }
 .chat-main { display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; min-width:0; min-height:0; background:var(--page); } .chat-header { display:none; } .chat-heading { min-width:0; } .chat-heading strong,.chat-heading span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -26,6 +26,7 @@ button:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-v
 .empty-state { padding-top:52px; }.welcome-title { flex-direction:column; gap:23px; }.empty-mark,.empty-mark svg { width:78px; height:78px; }.empty-state h1 { font-size:39px; letter-spacing:-1.5px; }
 @media (max-width:900px) { :root { --sidebar-width:320px; } .app-shell { grid-template-columns:1fr; } .sidebar { position:fixed; top:0; bottom:0; left:0; width:min(var(--sidebar-width),calc(100vw - 48px)); box-shadow:14px 0 34px rgba(30,35,50,.13); transform:translateX(-102%); transition:transform 180ms ease; }.sidebar.open { transform:translateX(0); }.sidebar-scrim.open,.sidebar-close,.sidebar-toggle { display:inline-grid; }.chat-header { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; min-height:52px; gap:9px; padding:7px 12px; border-bottom:1px solid var(--line); }.chat-heading strong { font-size:13px; }.chat-heading span { color:var(--muted); font-size:10px; } .empty-state { padding-top:40px; } }
 @media (max-width:640px) { .empty-state { width:calc(100% - 24px); justify-content:flex-start; padding-top:68px; } .welcome-title { gap:8px; }.empty-mark,.empty-mark svg { width:34px; height:34px; }.empty-state h1 { font-size:24px; letter-spacing:-.7px; }.message-list { width:calc(100% - 24px); padding-top:24px; }.message.user .message-body { max-width:92%; }.composer { padding:8px 10px 10px; }.composer-shell { padding:12px 12px 9px 15px; border-radius:22px; }.composer textarea { min-height:45px; font-size:16px; }.thinking-select { max-width:170px; font-size:12px; }.thinking-select select { max-width:135px; font-size:12px; }.model-select { display:none; }.send-button { width:40px; height:40px; font-size:23px; }.config-banner { width:calc(100% - 24px); } }
+@media (max-width:640px) { .history-delete-button { opacity:.72; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } }
 
 /* Chrome/macOS 阅读体验：收紧内容宽度，以更克制的字号和留白建立层级。 */
@@ -344,6 +345,20 @@ body {
   overscroll-behavior: none;
 }
 
+/* 空会话连同浏览器页面一起锁定，彻底移除右侧的页面级滚动条。 */
+html.is-empty-chat,
+body.is-empty-chat {
+  overflow: hidden !important;
+  scrollbar-width: none;
+}
+
+html.is-empty-chat::-webkit-scrollbar,
+body.is-empty-chat::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .app-shell {
   width: 100%;
   height: 100vh;
@@ -377,6 +392,32 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* 空会话不需要滚动：欢迎区在输入框上方的可用区域中严格居中。 */
+.conversation.is-empty {
+  position: relative;
+  display: block;
+  height: 100%;
+  overflow: clip;
+  overscroll-behavior: none;
+}
+
+.conversation.is-empty .empty-state {
+  position: absolute;
+  inset: 0;
+  left: 50%;
+  right: auto;
+  display: flex;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  transform: translateX(-50%);
+}
+
+/* 空会话不参与滚动链，避免滚轮或触控让欢迎标题产生上下偏移。 */
+.chat-main.is-empty {
+  overscroll-behavior: none;
 }
 
 .composer {

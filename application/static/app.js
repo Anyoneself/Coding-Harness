@@ -151,6 +151,8 @@ function renderChatHistory() {
         renderedGroup = group;
       }
 
+      const row = document.createElement("div");
+      row.className = "history-item-row";
       const button = document.createElement("button");
       button.type = "button";
       button.className = `history-item${chat.id === state.activeChatId ? " active" : ""}`;
@@ -161,7 +163,16 @@ function renderChatHistory() {
       status.textContent = chat.status || "等待输入";
       button.append(title, status);
       button.addEventListener("click", () => selectChat(chat.id));
-      elements.chatHistory.append(button);
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "history-delete-button";
+      deleteButton.title = `删除会话：${chat.title || "新对话"}`;
+      deleteButton.setAttribute("aria-label", deleteButton.title);
+      deleteButton.disabled = state.running;
+      deleteButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7h14M9 7V4.8h6V7m-8 0 1 12h8l1-12M10 10.5v5M14 10.5v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      deleteButton.addEventListener("click", () => deleteChat(chat.id));
+      row.append(button, deleteButton);
+      elements.chatHistory.append(row);
     });
 }
 
@@ -177,6 +188,9 @@ function setRunning(running) {
   elements.input.disabled = running;
   elements.modelSelect.disabled = running;
   elements.thinkingSelect.disabled = running;
+  elements.chatHistory.querySelectorAll(".history-delete-button").forEach((button) => {
+    button.disabled = running;
+  });
   elements.sendButton.classList.toggle("running", running);
   elements.sendIcon.textContent = running ? "■" : "↑";
   elements.sendButton.title = running ? "停止" : "发送";
@@ -203,9 +217,18 @@ function setChatStatus(status) {
   renderChatHistory();
 }
 
+/** 切换空会话的页面级滚动锁，避免欢迎页出现浏览器滚动条。 */
+function setEmptyConversationMode(isEmpty) {
+  elements.conversation.classList.toggle("is-empty", isEmpty);
+  document.querySelector(".chat-main")?.classList.toggle("is-empty", isEmpty);
+  document.documentElement.classList.toggle("is-empty-chat", isEmpty);
+  document.body.classList.toggle("is-empty-chat", isEmpty);
+}
+
 /** 显示对话列表并隐藏空状态。 */
 function showConversation() {
   elements.emptyState.classList.add("hidden");
+  setEmptyConversationMode(false);
 }
 
 /** 把受支持的 Markdown 行内语法转换为安全 DOM 节点。 */
@@ -825,10 +848,12 @@ function renderActiveChat() {
 
   if (!chat || !chat.messages.length) {
     elements.emptyState.classList.remove("hidden");
+    setEmptyConversationMode(true);
     return;
   }
 
   elements.emptyState.classList.add("hidden");
+  setEmptyConversationMode(false);
   chat.messages.forEach((message) => {
     const node = createMessageNode(
       message.role,
@@ -857,14 +882,100 @@ function selectChat(chatId) {
   elements.input.focus();
 }
 
-/** 创建新会话并保留已有历史记录。 */
+/** 经用户确认后删除服务端会话，并同步移除浏览器中的本地对话。 */
+async function deleteChat(chatId) {
+  if (state.running) return;
+  const chat = state.chats.find((item) => item.id === chatId);
+  if (!chat) return;
+  const confirmed = window.confirm(
+    `确定删除“${chat.title || "新对话"}”吗？会话内容和审计事件将无法恢复。`,
+  );
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/api/session/${encodeURIComponent(chatId)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    window.alert(`删除会话失败：${error.message}`);
+    return;
+  }
+
+  const wasActive = chatId === state.activeChatId;
+  state.chats = state.chats.filter((item) => item.id !== chatId);
+  if (!state.chats.length) state.chats.push(createChat());
+  persistChats();
+
+  if (!wasActive) {
+    renderChatHistory();
+    return;
+  }
+
+  const nextChat = state.chats[0];
+  state.activeChatId = nextChat.id;
+  state.sessionId = nextChat.id;
+  localStorage.setItem(`${STORAGE_KEY}:active`, nextChat.id);
+  clearActivity();
+  renderChatHistory();
+  renderActiveChat();
+  elements.input.focus();
+}
+
+/** 判断会话是否仍是可复用的无内容“新对话”，兼容旧版本地记录。 */
+function isReusableEmptyChat(chat) {
+  const messages = Array.isArray(chat.messages) ? chat.messages : [];
+  return messages.length === 0 && (chat.status === "等待输入" || chat.title === "新对话");
+}
+
+/** 返回更新时间最新的未使用会话，作为新建按钮的唯一复用目标。 */
+function findReusableEmptyChat() {
+  return state.chats
+    .filter(isReusableEmptyChat)
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0] || null;
+}
+
+/** 合并旧版本遗留的重复空会话，保留最新一条并维护当前会话选择。 */
+function collapseDuplicateEmptyChats() {
+  const reusableChat = findReusableEmptyChat();
+  if (!reusableChat) return;
+
+  const emptyChats = state.chats.filter(isReusableEmptyChat);
+  if (emptyChats.length < 2) return;
+
+  const savedChatId = localStorage.getItem(`${STORAGE_KEY}:active`);
+  state.chats = state.chats.filter(
+    (chat) => !isReusableEmptyChat(chat) || chat.id === reusableChat.id,
+  );
+  if (emptyChats.some((chat) => chat.id === savedChatId)) {
+    localStorage.setItem(`${STORAGE_KEY}:active`, reusableChat.id);
+  }
+  persistChats();
+}
+
+/** 创建或复用空会话，确保“新建对话”在全局范围内保持幂等。 */
 function createNewTask() {
+  const reusableChat = findReusableEmptyChat();
+  if (reusableChat) {
+    if (state.running && state.controller) state.controller.abort();
+    state.activeChatId = reusableChat.id;
+    state.sessionId = reusableChat.id;
+    localStorage.setItem(`${STORAGE_KEY}:active`, reusableChat.id);
+    persistChats();
+    clearActivity();
+    renderChatHistory();
+    renderActiveChat();
+    closeSidebar();
+    elements.input.focus();
+    return;
+  }
+
   if (state.running && state.controller) state.controller.abort();
-  const chat = createChat();
-  state.chats.unshift(chat);
-  state.activeChatId = chat.id;
-  state.sessionId = chat.id;
-  localStorage.setItem(`${STORAGE_KEY}:active`, chat.id);
+  const newChat = createChat();
+  state.chats.unshift(newChat);
+  state.activeChatId = newChat.id;
+  state.sessionId = newChat.id;
+  localStorage.setItem(`${STORAGE_KEY}:active`, newChat.id);
   persistChats();
   clearActivity();
   renderChatHistory();
@@ -947,6 +1058,7 @@ async function loadConfig() {
 /** 初始化对话、配置和页面事件。 */
 function initialize() {
   loadChats();
+  collapseDuplicateEmptyChats();
   ensureActiveChat();
   renderChatHistory();
   renderActiveChat();

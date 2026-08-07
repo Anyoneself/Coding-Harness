@@ -133,7 +133,7 @@ class AgentChatService:
     def reset_session(self, session_id: str) -> None:
         """清理指定会话上下文，并保留既有事件作为审计记录。"""
         with self._get_session_lock(session_id):
-            self.session_store.delete_session(session_id)
+            self.session_store.clear_session_context(session_id)
             request_id = str(uuid.uuid4())
             self.session_store.append_event(
                 session_id=session_id,
@@ -141,6 +141,11 @@ class AgentChatService:
                 sequence=1,
                 event={"type": "session_reset", "request_id": request_id},
             )
+
+    def delete_session(self, session_id: str) -> None:
+        """永久删除指定会话的模型上下文和全部审计事件。"""
+        with self._get_session_lock(session_id):
+            self.session_store.delete_session(session_id)
 
     def get_session_events(
         self,

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Path
 from fastapi.responses import StreamingResponse
 from openai import APIConnectionError, AuthenticationError, RateLimitError
 
@@ -78,6 +78,14 @@ def create_api_router(chat_service: AgentChatService) -> APIRouter:
     def reset_session(payload: ResetSessionRequest) -> dict[str, bool]:
         """清理指定会话并返回稳定的成功响应。"""
         chat_service.reset_session(payload.session_id)
+        return {"ok": True}
+
+    @router.delete("/session/{session_id}")
+    def delete_session(
+        session_id: Annotated[str, Path(min_length=1, max_length=128)],
+    ) -> dict[str, bool]:
+        """永久删除指定会话及其审计事件，并返回幂等成功响应。"""
+        chat_service.delete_session(session_id)
         return {"ok": True}
 
     @router.get("/health")

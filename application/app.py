@@ -47,6 +47,11 @@ def create_app(
         """返回 My-Agent Web 控制台首页。"""
         return FileResponse(STATIC_DIR / "index.html")
 
+    @application.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> FileResponse:
+        """返回站点图标，避免浏览器默认请求产生无意义的 404 日志。"""
+        return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+
     return application
 
 

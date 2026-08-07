@@ -64,10 +64,23 @@ class PostgresSessionStore:
                 )
             return int(row[0])
 
-    def delete_session(self, session_id: str) -> None:
-        """删除 PostgreSQL 中的会话上下文，同时保留审计事件。"""
+    def clear_session_context(self, session_id: str) -> None:
+        """清理 PostgreSQL 中的会话上下文，同时保留审计事件。"""
         pool = self._get_pool()
         with pool.connection() as connection:
+            connection.execute(
+                "DELETE FROM agent_sessions WHERE session_id = %s",
+                (session_id,),
+            )
+
+    def delete_session(self, session_id: str) -> None:
+        """在单个 PostgreSQL 事务中永久删除会话上下文和审计事件。"""
+        pool = self._get_pool()
+        with pool.connection() as connection:
+            connection.execute(
+                "DELETE FROM agent_events WHERE session_id = %s",
+                (session_id,),
+            )
             connection.execute(
                 "DELETE FROM agent_sessions WHERE session_id = %s",
                 (session_id,),

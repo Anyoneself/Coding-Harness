@@ -141,12 +141,28 @@ class InfrastructureTests(unittest.TestCase):
             event={"type": "started", "request_id": "request-1"},
         )
 
-        store.delete_session("audit-session")
+        store.clear_session_context("audit-session")
 
         self.assertEqual((0, {}), store.load("audit-session"))
         events = store.list_events("audit-session")
         self.assertEqual(1, len(events))
         self.assertEqual("started", events[0].event_type)
+
+    def test_session_delete_removes_context_and_audit_events(self) -> None:
+        """验证永久删除会话时同时清理上下文和全部审计事件。"""
+        store = SessionStore()
+        store.save("deleted-session", 0, {"messages": [{"role": "user", "content": "hi"}]})
+        store.append_event(
+            session_id="deleted-session",
+            request_id="request-delete",
+            sequence=1,
+            event={"type": "started", "request_id": "request-delete"},
+        )
+
+        store.delete_session("deleted-session")
+
+        self.assertEqual((0, {}), store.load("deleted-session"))
+        self.assertEqual([], store.list_events("deleted-session"))
 
     def test_concurrent_requests_preserve_state_versions(self) -> None:
         """验证并发请求通过重试保留连续的会话版本。"""
