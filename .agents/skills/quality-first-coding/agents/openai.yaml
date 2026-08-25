@@ -1,0 +1,4 @@
+interface:
+  display_name: "质量优先编码"
+  short_description: "在编码前完成测试策略、质量门禁、变异测试与自动化验证规划"
+  default_prompt: "使用 $quality-first-coding 按测试与质量门禁先行的流程实现这个需求。"
