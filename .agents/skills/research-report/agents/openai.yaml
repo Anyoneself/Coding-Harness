@@ -1,0 +1,4 @@
+interface:
+  display_name: "调研报告"
+  short_description: "调研知名实现并在项目文档中输出逐项引用的中文报告"
+  default_prompt: "使用 $research-report 调研这个主题，并将带有逐项参考来源的中文报告保存到项目 docs 目录。"

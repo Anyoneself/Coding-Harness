@@ -14,4 +14,7 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
-docs
+docs/*
+!docs/*/
+docs/*/*
+!docs/*/research.md
