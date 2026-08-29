@@ -7,11 +7,17 @@ import unittest
 from unittest.mock import Mock, patch
 
 from application.config import DeepSeekSettings
-from application.infrastructure.storage import build_knowledge_repository, build_session_repository
+from application.infrastructure.storage import (
+    build_knowledge_repository,
+    build_session_repository,
+    build_turn_execution_store,
+)
 from application.repositories import SessionStore
+from application.repositories.execution import SqliteTurnExecutionStore
 from application.repositories.knowledge import DEFAULT_DOCUMENTS
 from application.repositories.milvus_knowledge import MilvusKnowledgeBase
 from application.repositories.postgres_session import PostgresSessionStore
+from application.repositories.postgres_turn_execution import PostgresTurnExecutionStore
 
 
 class StorageConfigurationTests(unittest.TestCase):
@@ -50,6 +56,25 @@ class StorageConfigurationTests(unittest.TestCase):
 
         self.assertIsInstance(sessions, PostgresSessionStore)
         self.assertIsInstance(knowledge, MilvusKnowledgeBase)
+
+    def test_execution_store_follows_database_url_without_connecting_eagerly(self) -> None:
+        """验证执行控制面按数据库 URL 选择 SQLite 或懒连接 PostgreSQL。"""
+        sqlite_store = build_turn_execution_store(
+            DeepSeekSettings(api_key="", database_url="sqlite:///:memory:")
+        )
+        postgres_store = build_turn_execution_store(
+            DeepSeekSettings(
+                api_key="",
+                database_url="postgresql://agent:agent@127.0.0.1:5433/my_agent",
+            )
+        )
+        try:
+            self.assertIsInstance(sqlite_store, SqliteTurnExecutionStore)
+            self.assertIsInstance(postgres_store, PostgresTurnExecutionStore)
+            self.assertIsNone(postgres_store._pool)
+        finally:
+            sqlite_store.close()
+            postgres_store.close()
 
     def test_milvus_adapter_indexes_and_returns_safe_document_data(self) -> None:
         """验证 Milvus 适配器写入默认文档并转换向量检索结果。"""

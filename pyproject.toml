@@ -33,7 +33,7 @@ my-agent-demo = "examples.production_agent_demo:main"
 include = ["application*", "examples"]
 
 [tool.setuptools.package-data]
-application = ["static/*"]
+application = ["static/*", "db/migrations/*.sql"]
 
 [tool.ruff]
 exclude = ["examples/legacy"]

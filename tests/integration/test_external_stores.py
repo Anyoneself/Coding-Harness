@@ -9,6 +9,7 @@ import uuid
 from application.repositories.knowledge import DEFAULT_DOCUMENTS
 from application.repositories.milvus_knowledge import MilvusKnowledgeBase
 from application.repositories.postgres_session import PostgresSessionStore
+from application.repositories.postgres_turn_execution import PostgresTurnExecutionStore
 
 
 @unittest.skipUnless(os.environ.get("POSTGRES_TEST_DSN"), "未配置 PostgreSQL 集成测试")
@@ -41,6 +42,29 @@ class PostgresSessionStoreTests(unittest.TestCase):
         self.assertEqual([], state["messages"])
         self.assertEqual("started", events[0].event_type)
         self.assertEqual([], deleted_events)
+
+
+@unittest.skipUnless(os.environ.get("POSTGRES_TEST_DSN"), "未配置 PostgreSQL 集成测试")
+class PostgresTurnExecutionStoreTests(unittest.TestCase):
+    """验证 PostgreSQL 执行 Store 的迁移、事务和事件重放。"""
+
+    def test_turn_state_and_events_survive_repository_recreation(self) -> None:
+        """验证新执行 Schema 可重复迁移，并在仓储重建后保持事件。"""
+        database_url = os.environ["POSTGRES_TEST_DSN"]
+        first_store = PostgresTurnExecutionStore(database_url)
+        workspace = first_store.create_workspace("/tmp", "read_only")
+        thread = first_store.create_thread(workspace.id, f"postgres-{uuid.uuid4()}")
+        turn = first_store.create_turn(thread.id, "验证 PostgreSQL Store")
+        first_store.close()
+
+        second_store = PostgresTurnExecutionStore(database_url)
+        try:
+            persisted = second_store.get_turn(turn.id)
+            events = second_store.list_events(turn.id, after_sequence=0)
+            self.assertEqual("queued", persisted.status.value)
+            self.assertEqual([1], [event.sequence for event in events])
+        finally:
+            second_store.close()
 
 
 @unittest.skipUnless(os.environ.get("MILVUS_TEST_URI"), "未配置 Milvus 集成测试")

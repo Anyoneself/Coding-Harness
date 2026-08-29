@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..config import DeepSeekSettings
+from ..repositories.execution import SqliteTurnExecutionStore, TurnExecutionStore
 from ..repositories.knowledge import DEFAULT_DOCUMENTS, KnowledgeRepository, VersionedKnowledgeBase
 from ..repositories.milvus_knowledge import MilvusKnowledgeBase
 from ..repositories.postgres_session import PostgresSessionStore
+from ..repositories.postgres_turn_execution import PostgresTurnExecutionStore
 from ..repositories.session import SessionRepository, SessionStore
 
 
@@ -20,6 +22,18 @@ def build_session_repository(settings: DeepSeekSettings) -> SessionRepository:
     if settings.database_url.startswith("sqlite:///"):
         database_path = Path(settings.database_url.removeprefix("sqlite:///"))
         return SessionStore(str(database_path))
+    raise ValueError("DATABASE_URL 仅支持 postgresql:// 或 sqlite:/// 协议")
+
+
+def build_turn_execution_store(settings: DeepSeekSettings) -> TurnExecutionStore:
+    """按数据库 URL 装配第一阶段 PostgreSQL 或 SQLite 执行仓储。"""
+    if settings.database_url.startswith(("postgresql://", "postgres://")):
+        return PostgresTurnExecutionStore(settings.database_url)
+    if settings.database_url == "sqlite:///:memory:":
+        return SqliteTurnExecutionStore()
+    if settings.database_url.startswith("sqlite:///"):
+        database_path = Path(settings.database_url.removeprefix("sqlite:///"))
+        return SqliteTurnExecutionStore(str(database_path))
     raise ValueError("DATABASE_URL 仅支持 postgresql:// 或 sqlite:/// 协议")
 
 

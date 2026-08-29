@@ -70,3 +70,26 @@ python -m pip install -e .
 docker compose up -d
 python -m application serve
 ```
+
+## Coding Harness 执行 API
+
+项目已加入第一阶段可恢复执行底座，并保留原有 `/api/chat` 兼容链路。新链路以
+Workspace、Thread 和 Turn 为稳定资源：
+
+```text
+POST /api/workspaces
+POST /api/workspaces/{workspace_id}/threads
+POST /api/threads/{thread_id}/turns
+GET  /api/turns/{turn_id}
+GET  /api/turns/{turn_id}/events?after_sequence=0
+GET  /api/turns/{turn_id}/events/stream?after_sequence=0
+POST /api/turns/{turn_id}/interrupt
+POST /api/turns/{turn_id}/resume
+```
+
+创建 Turn 返回 `202 Accepted`，实际模型调用由单 Worker 的进程内 Scheduler 后台执行。
+事件先持久化到 PostgreSQL 或测试用 SQLite，再通过查询或 SSE 重放；断开 SSE 不会取消
+Turn。进程重启会把遗留的运行 Turn 标记为 `interrupted`，需要用户显式调用 resume。
+
+第一阶段只开放只读模型 Turn。当前没有被验证为可信的 OS 沙箱实现，命令执行边界使用
+`DenyCommandSandbox` 失败关闭，不会把工作区命令白名单表述为 OS 隔离。
