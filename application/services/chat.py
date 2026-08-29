@@ -50,6 +50,14 @@ class AgentChatService:
             self._close_resource(self.session_store)
             self._close_resource(self._knowledge_base)
 
+    def activate_agent(self, settings: DeepSeekSettings, agent: DeepSeekAgent) -> None:
+        """原子启用已构造的模型 Agent，并更新后续公开配置。"""
+        with self._lock:
+            if self.agent is not None:
+                raise RuntimeError("DeepSeek Agent is already configured")
+            self.settings = settings
+            self.agent = agent
+
     @staticmethod
     def _close_resource(resource: object | None) -> None:
         """仅在资源声明关闭能力时调用其关闭方法。"""
@@ -79,7 +87,7 @@ class AgentChatService:
             event = {
                 "type": "error",
                 "request_id": request_id,
-                "message": "尚未配置 DEEPSEEK_API_KEY，请先设置环境变量并重启服务。",
+                "message": "尚未配置 DEEPSEEK_API_KEY，请先在页面完成配置。",
             }
             self.session_store.append_event(
                 session_id=session_id,

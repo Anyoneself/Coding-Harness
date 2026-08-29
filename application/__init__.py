@@ -1,4 +1,4 @@
-"""My-Agent 公共 Python API。"""
+"""Coding-Harness 公共 Python API。"""
 
 from .agent import DeepSeekAgent
 from .config import DeepSeekSettings

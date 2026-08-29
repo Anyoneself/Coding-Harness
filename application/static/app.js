@@ -52,6 +52,12 @@ const elements = {
   sidebarToggle: document.querySelector("#sidebarToggle"),
   sidebarClose: document.querySelector("#sidebarClose"),
   sidebarScrim: document.querySelector("#sidebarScrim"),
+  apiKeySetup: document.querySelector("#apiKeySetup"),
+  apiKeyForm: document.querySelector("#apiKeyForm"),
+  apiKeyInput: document.querySelector("#apiKeyInput"),
+  apiKeyStatus: document.querySelector("#apiKeyStatus"),
+  saveApiKeyButton: document.querySelector("#saveApiKeyButton"),
+  toggleApiKeyVisibility: document.querySelector("#toggleApiKeyVisibility"),
 };
 
 /** 返回适合消息和 Trace 展示的当前时间。 */
@@ -383,7 +389,7 @@ function createMessageNode(
   const heading = document.createElement("div");
   heading.className = "message-heading";
   const name = document.createElement("strong");
-  name.textContent = role === "user" ? "你" : "My-Agent";
+  name.textContent = role === "user" ? "你" : "Coding-Harness";
   const time = document.createElement("span");
   time.textContent = nowLabel();
   heading.append(name, time);
@@ -775,9 +781,7 @@ async function consumeEventStream(response) {
 /** 发送一条用户消息并消费后端流式响应。 */
 async function sendTask(message) {
   if (!state.config?.ready) {
-    state.assistantPersisted = false;
-    state.assistantNode = addMessage("assistant", "正在检查服务配置", { pending: true, persist: false });
-    updateAssistant("尚未配置 DEEPSEEK_API_KEY，请先完成服务端配置。", true);
+    openApiKeySetup();
     return;
   }
 
@@ -1008,6 +1012,58 @@ function closeSidebar() {
   elements.sidebarScrim.classList.remove("open");
 }
 
+/** 打开首次配置界面并把输入焦点放到密钥字段。 */
+function openApiKeySetup() {
+  elements.apiKeySetup.classList.remove("hidden");
+  window.setTimeout(() => elements.apiKeyInput.focus(), 0);
+}
+
+/** 在模型就绪后关闭首次配置界面并清除敏感输入。 */
+function closeApiKeySetup() {
+  elements.apiKeyInput.value = "";
+  elements.apiKeyInput.type = "password";
+  elements.apiKeyStatus.textContent = "";
+  elements.apiKeySetup.classList.add("hidden");
+}
+
+/** 提交 API Key，并在成功后重新加载公开配置。 */
+async function configureApiKey() {
+  const apiKey = elements.apiKeyInput.value.trim();
+  if (!apiKey) return;
+  elements.saveApiKeyButton.disabled = true;
+  elements.saveApiKeyButton.textContent = "正在连接";
+  elements.apiKeyStatus.textContent = "";
+  try {
+    const response = await fetch("/api/config/api-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    if (!response.ok) {
+      throw new Error(response.status === 409 ? "API Key 已完成配置，请刷新页面。" : "API Key 无效，请检查后重试。");
+    }
+    elements.apiKeyInput.value = "";
+    await loadConfig();
+    elements.input.focus();
+  } catch (error) {
+    elements.apiKeyStatus.textContent = error.message;
+    elements.apiKeyInput.focus();
+  } finally {
+    elements.saveApiKeyButton.disabled = false;
+    elements.saveApiKeyButton.textContent = "保存并连接";
+  }
+}
+
+/** 切换密钥字段可见性，并同步无障碍名称。 */
+function toggleApiKeyVisibility() {
+  const shouldShow = elements.apiKeyInput.type === "password";
+  elements.apiKeyInput.type = shouldShow ? "text" : "password";
+  const label = shouldShow ? "隐藏 API Key" : "显示 API Key";
+  elements.toggleApiKeyVisibility.setAttribute("aria-label", label);
+  elements.toggleApiKeyVisibility.title = label;
+  elements.apiKeyInput.focus();
+}
+
 /** 从服务端加载模型、工具和连接状态。 */
 async function loadConfig() {
   try {
@@ -1043,9 +1099,10 @@ async function loadConfig() {
       ? "DeepSeek 已连接"
       : "等待 API Key";
     if (!state.config.ready) {
-      elements.configBanner.textContent =
-        "未检测到 DEEPSEEK_API_KEY。完成服务端配置后即可调用真实 DeepSeek 模型。";
-      elements.configBanner.classList.remove("hidden");
+      openApiKeySetup();
+    } else {
+      elements.configBanner.classList.add("hidden");
+      closeApiKeySetup();
     }
   } catch (error) {
     elements.configBanner.textContent = `无法读取服务配置：${error.message}`;
@@ -1099,6 +1156,11 @@ elements.traceBackdrop.addEventListener("click", closeTrace);
 elements.sidebarToggle.addEventListener("click", openSidebar);
 elements.sidebarClose.addEventListener("click", closeSidebar);
 elements.sidebarScrim.addEventListener("click", closeSidebar);
+elements.apiKeyForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  configureApiKey();
+});
+elements.toggleApiKeyVisibility.addEventListener("click", toggleApiKeyVisibility);
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {

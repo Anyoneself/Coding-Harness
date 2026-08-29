@@ -29,6 +29,27 @@ button:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-v
 @media (max-width:640px) { .history-delete-button { opacity:.72; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } }
 
+.api-key-setup { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:24px; background:rgba(20,29,50,.48); }
+.api-key-panel { display:grid; width:min(440px,100%); gap:12px; padding:28px; border:1px solid var(--line); border-radius:8px; background:var(--surface); box-shadow:0 24px 70px rgba(21,31,55,.22); }
+.api-key-heading { display:flex; align-items:flex-start; gap:12px; margin-bottom:7px; }
+.api-key-heading .brand-mark { flex:0 0 auto; color:var(--accent); }
+.api-key-heading h2,.api-key-heading p { margin:0; letter-spacing:0; }
+.api-key-heading h2 { font-size:19px; font-weight:700; }
+.api-key-heading p { margin-top:5px; color:var(--muted); font-size:12px; }
+.api-key-heading code { font-size:11px; }
+.api-key-label { color:var(--text-soft); font-size:12px; font-weight:650; }
+.api-key-field { display:grid; grid-template-columns:minmax(0,1fr) 42px; min-height:46px; overflow:hidden; border:1px solid var(--line-strong); border-radius:7px; background:#fff; }
+.api-key-field:focus-within { border-color:#9bb2ff; box-shadow:0 0 0 3px rgba(63,111,255,.1); }
+.api-key-field input { min-width:0; padding:0 13px; border:0; outline:0; background:transparent; color:var(--text); font:14px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.api-key-visibility { display:grid; width:42px; height:44px; place-items:center; padding:0; border:0; border-left:1px solid var(--line); background:transparent; color:var(--muted); }
+.api-key-visibility:hover { color:var(--text); background:var(--surface-soft); }
+.api-key-visibility svg { width:19px; height:19px; }
+.api-key-status { min-height:18px; margin:0; color:var(--danger); font-size:12px; line-height:1.5; }
+.api-key-submit { min-height:44px; padding:0 18px; border:0; border-radius:7px; background:var(--accent); color:#fff; font-weight:650; }
+.api-key-submit:hover { background:#2859e8; }
+.api-key-submit:disabled { cursor:wait; opacity:.62; }
+@media (max-width:640px) { .api-key-setup { align-items:end; padding:12px; }.api-key-panel { padding:22px 18px; }.api-key-heading h2 { font-size:17px; } }
+
 /* Chrome/macOS 阅读体验：收紧内容宽度，以更克制的字号和留白建立层级。 */
 :root {
   --content-width: 860px;

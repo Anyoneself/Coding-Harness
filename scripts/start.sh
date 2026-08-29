@@ -12,11 +12,11 @@ show_help() {
   cat <<'EOF'
 用法：./scripts/start.sh [--infra-only] [application serve 参数]
 
-一键启动 My-Agent：
+一键启动 Coding-Harness：
   1. 确认 Docker 可用，macOS + Colima 环境会自动启动 Colima。
   2. 创建 .venv 并在缺少依赖时安装项目。
   3. 启动 PostgreSQL、Milvus、etcd 和 MinIO，并等待健康检查。
-  4. 前台启动 My-Agent Web 服务。
+  4. 前台启动 Coding-Harness Web 服务。
 
 选项：
   --infra-only   只启动基础设施，不启动 Web 服务
@@ -31,7 +31,7 @@ EOF
 
 fail() {
   # 输出明确错误并终止启动流程。
-  echo "[My-Agent] 错误：$*" >&2
+  echo "[Coding-Harness] 错误：$*" >&2
   exit 1
 }
 
@@ -54,7 +54,7 @@ ensure_docker() {
     return
   fi
   if command -v colima >/dev/null 2>&1; then
-    echo "[My-Agent] Docker 尚未运行，正在启动 Colima（4 CPU / 8 GB）..."
+    echo "[Coding-Harness] Docker 尚未运行，正在启动 Colima（4 CPU / 8 GB）..."
     colima start --cpu 4 --memory 8
   fi
   docker info >/dev/null 2>&1 || fail "Docker 未运行，请先启动 Docker Desktop 或 Colima。"
@@ -74,7 +74,7 @@ select_python() {
       fi
     done
     [[ -n "${bootstrap_python}" ]] || fail "未找到 Python 3.11 或更高版本。"
-    echo "[My-Agent] 正在创建 .venv..."
+    echo "[Coding-Harness] 正在创建 .venv..."
     "${bootstrap_python}" -m venv "${PROJECT_ROOT}/.venv"
   fi
   PYTHON_COMMAND="${PROJECT_ROOT}/.venv/bin/python"
@@ -85,7 +85,7 @@ ensure_application_dependencies() {
   if "${PYTHON_COMMAND}" -c 'import fastapi, openai, psycopg, pymilvus' >/dev/null 2>&1; then
     return
   fi
-  echo "[My-Agent] 正在安装项目依赖..."
+  echo "[Coding-Harness] 正在安装项目依赖..."
   "${PYTHON_COMMAND}" -m pip install -e "${PROJECT_ROOT}"
 }
 
@@ -95,7 +95,7 @@ ensure_environment_file() {
     return
   fi
   cp "${PROJECT_ROOT}/.env.example" "${PROJECT_ROOT}/.env"
-  echo "[My-Agent] 已创建 .env；使用真实模型前请填写 DEEPSEEK_API_KEY。"
+  echo "[Coding-Harness] 已创建 .env；使用真实模型前请填写 DEEPSEEK_API_KEY。"
 }
 
 wait_for_container() {
@@ -107,7 +107,7 @@ wait_for_container() {
   while (( $(date +%s) < deadline )); do
     status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_name}" 2>/dev/null || true)"
     if [[ "${status}" == "healthy" || "${status}" == "running" ]]; then
-      echo "[My-Agent] ${service_name} 已就绪。"
+      echo "[Coding-Harness] ${service_name} 已就绪。"
       return
     fi
     if [[ "${status}" == "unhealthy" || "${status}" == "exited" || "${status}" == "dead" ]]; then
@@ -122,7 +122,7 @@ wait_for_container() {
 
 start_infrastructure() {
   # 启动项目所需容器，并逐个确认服务健康。
-  echo "[My-Agent] 正在启动 PostgreSQL 与 Milvus..."
+  echo "[Coding-Harness] 正在启动 PostgreSQL 与 Milvus..."
   "${COMPOSE_COMMAND[@]}" -f "${PROJECT_ROOT}/docker-compose.yml" up -d
   wait_for_container postgres my-agent-postgres
   wait_for_container etcd my-agent-milvus-etcd
@@ -148,10 +148,10 @@ main() {
   ensure_environment_file
   start_infrastructure
   if [[ "${INFRA_ONLY}" == true ]]; then
-    echo "[My-Agent] 基础设施已启动。"
+    echo "[Coding-Harness] 基础设施已启动。"
     return
   fi
-  echo "[My-Agent] 正在启动 Web 服务..."
+  echo "[Coding-Harness] 正在启动 Web 服务..."
   exec "${PYTHON_COMMAND}" -m application serve "$@"
 }
 

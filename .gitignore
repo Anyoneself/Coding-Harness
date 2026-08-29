@@ -5,6 +5,7 @@
 .idea/
 .mini-agent-memory.jsonl
 .my-agent/
+.coding-harness/
 .ruff_cache/
 .venv/
 __pycache__/

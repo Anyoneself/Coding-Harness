@@ -79,9 +79,9 @@ Web / CLI / CI
 新增：
 
 ```text
-my-agent exec <goal> [--workspace PATH] [--json]
-my-agent resume <turn-id> [--json]
-my-agent inspect <turn-id> [--json]
+coding-harness exec <goal> [--workspace PATH] [--json]
+coding-harness resume <turn-id> [--json]
+coding-harness inspect <turn-id> [--json]
 ```
 
 - CLI 只调用现有 Service 或 API，不建立平行业务链。
@@ -199,6 +199,6 @@ Feature: P1 能力复用可追溯的执行控制面
 ## 参考资料
 
 - [Coding Harness 产品与架构设计](../../pm/architecture/coding-harness-design.md)，访问日期：2026-08-29。
-- [My-Agent 系统架构](../../architecture.md)，访问日期：2026-08-29。
+- [Coding-Harness 系统架构](../../architecture.md)，访问日期：2026-08-29。
 - [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server)，Thread/Turn/Item 和流式协议参考，访问日期：2026-08-29。
 - [OpenTelemetry Documentation](https://opentelemetry.io/docs/)，Trace、指标与日志关联参考，访问日期：2026-08-29。

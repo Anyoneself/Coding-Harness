@@ -1,4 +1,4 @@
-"""My-Agent 命令行入口。"""
+"""Coding-Harness 命令行入口。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,10 @@ from ..services.chat import AgentChatService
 
 def build_parser() -> argparse.ArgumentParser:
     """创建包含 Web 服务子命令的命令行解析器。"""
-    parser = argparse.ArgumentParser(prog="my-agent", description="My-Agent 工程命令行")
+    parser = argparse.ArgumentParser(
+        prog="coding-harness",
+        description="Coding-Harness 工程命令行",
+    )
     subcommands = parser.add_subparsers(dest="command")
     serve = subcommands.add_parser("serve", help="启动 Web 与 SSE 服务")
     serve.add_argument("--host", default="127.0.0.1", help="监听地址")
@@ -37,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_server(host: str, port: int, reload_enabled: bool) -> None:
-    """使用 Uvicorn 启动 My-Agent Web 应用。"""
+    """使用 Uvicorn 启动 Coding-Harness Web 应用。"""
     import uvicorn
 
     uvicorn.run(

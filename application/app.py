@@ -1,4 +1,4 @@
-"""My-Agent Web 应用的依赖装配入口。"""
+"""Coding-Harness Web 应用的依赖装配入口。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .config import DeepSeekSettings
 from .controllers.http import create_api_router
 from .infrastructure.storage import build_turn_execution_store
 from .services.chat import AgentChatService
+from .services.configuration import ApiKeyConfigurationService
 from .services.execution import HarnessRuntime
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -27,11 +28,18 @@ def create_app(
     *,
     chat_service: AgentChatService | None = None,
     harness_runtime: HarnessRuntime | None = None,
+    env_path: Path | None = None,
 ) -> FastAPI:
     """装配配置、应用服务、API 路由和静态资源。"""
     runtime_settings = settings or DeepSeekSettings.from_env()
     runtime_chat_service = chat_service or AgentChatService(runtime_settings)
     runtime_harness = harness_runtime or _build_harness_runtime(runtime_settings)
+    configuration_service = ApiKeyConfigurationService(
+        runtime_settings,
+        runtime_chat_service,
+        runtime_harness,
+        env_path or Path.cwd() / ".env",
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -43,16 +51,23 @@ def create_app(
             runtime_harness.close()
             runtime_chat_service.close()
 
-    application = FastAPI(title="My-Agent", version="1.0.0", lifespan=lifespan)
+    application = FastAPI(title="Coding-Harness", version="1.0.0", lifespan=lifespan)
     application.state.settings = runtime_settings
     application.state.chat_service = runtime_chat_service
     application.state.harness_runtime = runtime_harness
-    application.include_router(create_api_router(runtime_chat_service, runtime_harness))
+    application.state.configuration_service = configuration_service
+    application.include_router(
+        create_api_router(
+            runtime_chat_service,
+            runtime_harness,
+            configuration_service,
+        )
+    )
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @application.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        """返回 My-Agent Web 控制台首页。"""
+        """返回 Coding-Harness Web 控制台首页。"""
         return FileResponse(STATIC_DIR / "index.html")
 
     @application.get("/favicon.ico", include_in_schema=False)

@@ -1,11 +1,12 @@
-"""My-Agent HTTP 接口使用的请求与响应模型。"""
+"""Coding-Harness HTTP 接口使用的请求与响应模型。"""
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from ..domain.execution import ExecutionBudget, PermissionProfile
 
@@ -26,6 +27,30 @@ class ResetSessionRequest(BaseModel):
     """描述需要清理上下文的会话。"""
 
     session_id: str = Field(min_length=1, max_length=128)
+
+
+class ApiKeyConfigurationRequest(BaseModel):
+    """描述首次启用 DeepSeek 模型所需的敏感配置。"""
+
+    api_key: SecretStr
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, value: SecretStr) -> SecretStr:
+        """拒绝过短、包含空白或无法安全写入环境文件的密钥。"""
+        secret = value.get_secret_value().strip()
+        if not 16 <= len(secret) <= 256:
+            raise ValueError("API Key 长度必须在 16 到 256 个字符之间")
+        if re.fullmatch(r"sk-[A-Za-z0-9._-]+", secret) is None:
+            raise ValueError("API Key 格式无效")
+        return SecretStr(secret)
+
+
+class ApiKeyConfigurationResponse(BaseModel):
+    """返回首次配置是否完成，不包含任何密钥内容。"""
+
+    ok: bool
+    ready: bool
 
 
 class WorkspaceCreateRequest(BaseModel):

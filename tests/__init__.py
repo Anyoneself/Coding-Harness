@@ -1,1 +1,1 @@
-"""My-Agent 测试包。"""
+"""Coding-Harness 测试包。"""

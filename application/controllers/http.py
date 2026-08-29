@@ -1,12 +1,13 @@
-"""My-Agent 的 HTTP 与 SSE 接入层。"""
+"""Coding-Harness 的 HTTP 与 SSE 接入层。"""
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from collections.abc import Iterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import StreamingResponse
 from openai import APIConnectionError, AuthenticationError, RateLimitError
 
@@ -19,6 +20,8 @@ from ..domain.execution import (
 )
 from ..repositories.execution import ActiveTurnExistsError, TurnLeaseConflictError
 from ..schemas.http import (
+    ApiKeyConfigurationRequest,
+    ApiKeyConfigurationResponse,
     ChatRequest,
     ResetSessionRequest,
     ThreadCreateRequest,
@@ -30,6 +33,7 @@ from ..schemas.http import (
     WorkspaceResponse,
 )
 from ..services.chat import AgentChatService
+from ..services.configuration import ApiKeyAlreadyConfiguredError, ApiKeyConfigurationService
 from ..services.execution import HarnessRuntime
 
 
@@ -56,6 +60,7 @@ def friendly_error(exc: Exception) -> str:
 def create_api_router(
     chat_service: AgentChatService,
     harness_runtime: HarnessRuntime | None = None,
+    configuration_service: ApiKeyConfigurationService | None = None,
 ) -> APIRouter:
     """创建仅负责协议转换的 API 路由集合。"""
     router = APIRouter(prefix="/api")
@@ -64,6 +69,26 @@ def create_api_router(
     def get_config() -> dict[str, Any]:
         """返回前端可以读取的 Agent 配置。"""
         return chat_service.get_public_config()
+
+    if configuration_service is not None:
+
+        @router.post("/config/api-key", response_model=ApiKeyConfigurationResponse)
+        def configure_api_key(
+            payload: ApiKeyConfigurationRequest,
+            request: Request,
+        ) -> ApiKeyConfigurationResponse:
+            """提交首次 API Key 配置并映射重复配置冲突。"""
+            if not _is_local_request(request):
+                raise HTTPException(status_code=403, detail="仅允许在本机完成 API Key 配置")
+            try:
+                ready = configuration_service.configure_api_key(
+                    payload.api_key.get_secret_value(),
+                )
+            except ApiKeyAlreadyConfiguredError as exc:
+                raise HTTPException(status_code=409, detail="API Key 已完成配置") from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="API Key 格式无效") from exc
+            return ApiKeyConfigurationResponse(ok=True, ready=ready)
 
     @router.post("/chat")
     def chat(payload: ChatRequest) -> StreamingResponse:
@@ -118,6 +143,17 @@ def create_api_router(
         _register_execution_routes(router, harness_runtime)
 
     return router
+
+
+def _is_local_request(request: Request) -> bool:
+    """仅允许回环地址和测试客户端调用本机敏感配置入口。"""
+    host = request.client.host if request.client is not None else ""
+    if host == "testclient":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
 
 
 def _register_execution_routes(router: APIRouter, runtime: HarnessRuntime) -> None:

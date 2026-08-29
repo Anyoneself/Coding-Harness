@@ -292,6 +292,10 @@ class TurnExecutionService:
         self._context_builder = context_builder or ContextBuilder(store)
         self._worker_id = f"worker-{uuid.uuid4()}"
 
+    def replace_provider(self, provider: ModelProvider) -> None:
+        """替换后续 Turn 使用的模型 Provider。"""
+        self._provider = provider
+
     def execute(self, turn_id: str) -> None:
         """领取并执行一个 Turn，将所有可观察结果持久化后通知订阅者。"""
         turn = self._store.claim_turn(
@@ -483,6 +487,16 @@ class HarnessRuntime:
         self.query_service = TurnQueryService(store)
         self._closed = False
         self._lock = threading.RLock()
+
+    def activate_provider(self, provider: ModelProvider) -> None:
+        """启用已构造的 Provider，并释放启动时的不可用占位实现。"""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Harness Runtime is closed")
+            previous_provider = self.provider
+            self.provider = provider
+            self.execution_service.replace_provider(provider)
+        previous_provider.close()
 
     def recover_interrupted_turns(self) -> list[str]:
         """在 P0 单进程启动时把旧 Worker 遗留 Turn 标记为 interrupted。"""

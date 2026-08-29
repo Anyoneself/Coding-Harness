@@ -36,7 +36,7 @@ class DeepSeekSettings:
 
     @classmethod
     def from_env(cls) -> DeepSeekSettings:
-        """从环境变量读取并规范化 My-Agent 运行配置。"""
+        """从环境变量读取并规范化 Coding-Harness 运行配置。"""
         workspace_root = Path(os.environ.get("AGENT_WORKSPACE", Path.cwd())).resolve()
         model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash").strip()
         configured_models = os.environ.get(

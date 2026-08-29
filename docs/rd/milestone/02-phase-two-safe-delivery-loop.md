@@ -227,6 +227,6 @@ P0 发布指标：security 越权放行为 0，审批绕过为 0，范围外文�
 ## 参考资料
 
 - [Coding Harness 产品与架构设计](../../pm/architecture/coding-harness-design.md)，访问日期：2026-08-29。
-- [My-Agent 系统架构](../../architecture.md)，访问日期：2026-08-29。
+- [Coding-Harness 系统架构](../../architecture.md)，访问日期：2026-08-29。
 - [OpenAI Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security)，审批与执行边界参考，访问日期：2026-08-29。
 - [WHATWG Server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html)，重连与事件流参考，访问日期：2026-08-29。

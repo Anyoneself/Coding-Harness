@@ -397,8 +397,11 @@ class DeepSeekAgentTests(unittest.TestCase):
         )
         application = create_app(settings)
         with TestClient(application) as client:
+            self.assertEqual("Coding-Harness", application.title)
             home_response = client.get("/")
             self.assertEqual(200, home_response.status_code)
+            self.assertIn("Coding-Harness", home_response.text)
+            self.assertNotIn("My-Agent", home_response.text)
             self.assertIn('id="chatHistory"', home_response.text)
             self.assertIn('id="activityPanel"', home_response.text)
             self.assertIn('id="messageInput"', home_response.text)
@@ -628,7 +631,9 @@ class DeepSeekAgentTests(unittest.TestCase):
 
     def test_cli_parser_exposes_serve_command(self) -> None:
         """验证 CLI 从 application 包暴露稳定的 serve 子命令。"""
-        arguments = build_parser().parse_args(["serve", "--host", "0.0.0.0", "--port", "9000"])
+        parser = build_parser()
+        self.assertEqual("coding-harness", parser.prog)
+        arguments = parser.parse_args(["serve", "--host", "0.0.0.0", "--port", "9000"])
         self.assertEqual("serve", arguments.command)
         self.assertEqual("0.0.0.0", arguments.host)
         self.assertEqual(9000, arguments.port)

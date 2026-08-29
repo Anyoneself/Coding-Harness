@@ -7,7 +7,7 @@
 - 团队：2 名后端，前端参与契约评审，安全与 QA 兼职
 - 前置依赖：无
 - 产品输入：[Coding Harness 产品与架构设计](../../pm/architecture/coding-harness-design.md)
-- 工程基线：[My-Agent 系统架构](../../architecture.md)
+- 工程基线：[Coding-Harness 系统架构](../../architecture.md)
 - 阶段置信度：`0.79`；完成沙箱探针后预计提升至 `0.86`
 
 ## 阶段目标
@@ -190,6 +190,6 @@ Feature: Turn 脱离客户端连接后仍可可靠执行
 ## 参考资料
 
 - [Coding Harness 产品与架构设计](../../pm/architecture/coding-harness-design.md)，访问日期：2026-08-29。
-- [My-Agent 系统架构](../../architecture.md)，访问日期：2026-08-29。
+- [Coding-Harness 系统架构](../../architecture.md)，访问日期：2026-08-29。
 - [WHATWG Server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html)，SSE 重连语义参考，访问日期：2026-08-29。
 - [PostgreSQL Explicit Locking](https://www.postgresql.org/docs/current/explicit-locking.html)，租约和迁移并发控制参考，访问日期：2026-08-29。
