@@ -1,3 +1,6 @@
+# 保留原 Compose 项目标识，使项目改名后仍能接管既有容器、网络和数据卷。
+name: my-agent
+
 services:
   postgres:
     container_name: my-agent-postgres
