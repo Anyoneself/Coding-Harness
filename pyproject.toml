@@ -10,12 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",
-  "langgraph>=0.2.0",
   "openai>=1.55.0",
   "psycopg[binary,pool]>=3.2.0,<4.0.0",
-  "pymilvus>=2.6.0,<3.0.0",
   "python-dotenv>=1.0.1",
-  "tavily-python>=0.5.0",
   "uvicorn[standard]>=0.30.0",
 ]
 
@@ -27,16 +24,14 @@ dev = [
 
 [project.scripts]
 coding-harness = "application.cli:main"
-coding-harness-demo = "examples.production_agent_demo:main"
 
 [tool.setuptools.packages.find]
-include = ["application*", "examples"]
+include = ["application*"]
 
 [tool.setuptools.package-data]
 application = ["static/*", "db/migrations/*.sql"]
 
 [tool.ruff]
-exclude = ["examples/legacy"]
 line-length = 100
 target-version = "py311"
 

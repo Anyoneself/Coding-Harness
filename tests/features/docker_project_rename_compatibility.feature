@@ -9,4 +9,4 @@
     当 用户在 Coding-Harness 目录执行启动脚本
     那么 Compose 应继续使用 my-agent 作为基础设施项目标识
     并且 不应以 coding-harness 项目身份重复创建同名容器
-    并且 原有 PostgreSQL 与 Milvus 数据卷应保持不变
+    并且 原有 PostgreSQL 数据卷应保持不变

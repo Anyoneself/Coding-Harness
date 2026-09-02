@@ -472,6 +472,7 @@ class HarnessRuntime:
         provider: ModelProvider,
         *,
         max_workers: int = 1,
+        model_ready: bool = True,
     ) -> None:
         """装配可运行的后台 Turn 纵向闭环。"""
         self.store = store
@@ -485,8 +486,14 @@ class HarnessRuntime:
         self.thread_service = ThreadService(store)
         self.command_service = TurnCommandService(store, self.scheduler)
         self.query_service = TurnQueryService(store)
+        self._model_ready = model_ready
         self._closed = False
         self._lock = threading.RLock()
+
+    @property
+    def model_ready(self) -> bool:
+        """返回当前 Runtime 是否已装配可调用的模型 Provider。"""
+        return self._model_ready
 
     def activate_provider(self, provider: ModelProvider) -> None:
         """启用已构造的 Provider，并释放启动时的不可用占位实现。"""
@@ -496,6 +503,7 @@ class HarnessRuntime:
             previous_provider = self.provider
             self.provider = provider
             self.execution_service.replace_provider(provider)
+            self._model_ready = True
         previous_provider.close()
 
     def recover_interrupted_turns(self) -> list[str]:

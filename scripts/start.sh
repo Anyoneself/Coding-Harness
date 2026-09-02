@@ -15,7 +15,7 @@ show_help() {
 一键启动 Coding-Harness：
   1. 确认 Docker 可用，macOS + Colima 环境会自动启动 Colima。
   2. 创建 .venv 并在缺少依赖时安装项目。
-  3. 启动 PostgreSQL、Milvus、etcd 和 MinIO，并等待健康检查。
+  3. 启动 PostgreSQL，并等待健康检查。
   4. 前台启动 Coding-Harness Web 服务。
 
 选项：
@@ -49,13 +49,13 @@ select_compose_command() {
 }
 
 ensure_docker() {
-  # 优先复用现有 Docker；Colima 未启动时按 Milvus 最低资源要求启动。
+  # 优先复用现有 Docker；Colima 未启动时启动本地 Docker 环境。
   if docker info >/dev/null 2>&1; then
     return
   fi
   if command -v colima >/dev/null 2>&1; then
     echo "[Coding-Harness] Docker 尚未运行，正在启动 Colima（4 CPU / 8 GB）..."
-    colima start --cpu 4 --memory 8
+    colima start
   fi
   docker info >/dev/null 2>&1 || fail "Docker 未运行，请先启动 Docker Desktop 或 Colima。"
 }
@@ -82,7 +82,7 @@ select_python() {
 
 ensure_application_dependencies() {
   # 仅在关键运行依赖缺失时执行可编辑安装，避免每次启动重复下载。
-  if "${PYTHON_COMMAND}" -c 'import fastapi, openai, psycopg, pymilvus' >/dev/null 2>&1; then
+  if "${PYTHON_COMMAND}" -c 'import fastapi, openai, psycopg' >/dev/null 2>&1; then
     return
   fi
   echo "[Coding-Harness] 正在安装项目依赖..."
@@ -122,12 +122,9 @@ wait_for_container() {
 
 start_infrastructure() {
   # 启动项目所需容器，并逐个确认服务健康。
-  echo "[Coding-Harness] 正在启动 PostgreSQL 与 Milvus..."
+  echo "[Coding-Harness] 正在启动 PostgreSQL..."
   "${COMPOSE_COMMAND[@]}" -f "${PROJECT_ROOT}/docker-compose.yml" up -d
   wait_for_container postgres my-agent-postgres
-  wait_for_container etcd my-agent-milvus-etcd
-  wait_for_container minio my-agent-milvus-minio
-  wait_for_container milvus my-agent-milvus
 }
 
 main() {

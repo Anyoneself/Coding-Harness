@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -15,20 +14,6 @@ from fastapi.testclient import TestClient
 from application.agent.provider import ModelCompleted, ModelDelta, ModelRequest
 from application.app import create_app
 from application.config import DeepSeekSettings
-
-
-class ConfiguredFakeAgent:
-    """模拟完成配置后的聊天 Agent，避免测试访问外部模型。"""
-
-    def __init__(self, settings: DeepSeekSettings, *, tools: Any) -> None:
-        """记录安全配置和工具注册表，供运行时激活断言使用。"""
-        self.settings = settings
-        self.tools = tools
-        self.closed = False
-
-    def close(self) -> None:
-        """记录应用生命周期是否释放了伪 Agent。"""
-        self.closed = True
 
 
 class ConfiguredFakeProvider:
@@ -52,7 +37,7 @@ class ApiKeyConfigurationTests(unittest.TestCase):
     """验证前端首次配置到运行时激活的完整安全契约。"""
 
     def test_first_configuration_persists_secret_and_activates_runtime(self) -> None:
-        """验证密钥安全落盘后，聊天和 Harness 无需重启即可就绪。"""
+        """验证密钥安全落盘后，Harness 无需重启即可就绪。"""
         secret = "sk-integration-secret-123456"
         previous_api_key = os.environ.pop("DEEPSEEK_API_KEY", None)
         try:
@@ -68,17 +53,10 @@ class ApiKeyConfigurationTests(unittest.TestCase):
                 settings = DeepSeekSettings(
                     api_key="",
                     database_url="sqlite:///:memory:",
-                    milvus_enabled=False,
                 )
-                with (
-                    patch(
-                        "application.services.configuration.DeepSeekAgent",
-                        ConfiguredFakeAgent,
-                    ),
-                    patch(
-                        "application.services.configuration.DeepSeekModelProvider",
-                        ConfiguredFakeProvider,
-                    ),
+                with patch(
+                    "application.services.configuration.DeepSeekModelProvider",
+                    ConfiguredFakeProvider,
                 ):
                     application = create_app(settings, env_path=env_path)
                     with TestClient(application) as client:
@@ -90,10 +68,6 @@ class ApiKeyConfigurationTests(unittest.TestCase):
                         self.assertEqual({"ok": True, "ready": True}, response.json())
                         self.assertNotIn(secret, response.text)
                         self.assertTrue(client.get("/api/config").json()["ready"])
-                        self.assertIsInstance(
-                            application.state.chat_service.agent,
-                            ConfiguredFakeAgent,
-                        )
                         self.assertIsInstance(
                             application.state.harness_runtime.provider,
                             ConfiguredFakeProvider,

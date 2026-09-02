@@ -42,7 +42,6 @@ class ExecutionHttpTests(unittest.TestCase):
                 DeepSeekSettings(
                     api_key="",
                     database_url="sqlite:///:memory:",
-                    milvus_enabled=False,
                 ),
                 harness_runtime=runtime,
             )
@@ -79,8 +78,17 @@ class ExecutionHttpTests(unittest.TestCase):
                 self.assertTrue(all(sequence > 1 for sequence in sequences))
                 self.assertEqual("completed", turn["status"])
 
-                legacy_health = client.get("/api/health")
-                self.assertEqual(200, legacy_health.status_code)
+                health = client.get("/api/health")
+                self.assertEqual({"ok": True, "model_ready": True}, health.json())
+                self.assertEqual(404, client.post("/api/chat", json={}).status_code)
+                self.assertEqual(404, client.post("/api/session/reset", json={}).status_code)
+                self.assertEqual(404, client.delete("/api/session/legacy").status_code)
+
+                script = client.get("/static/app.js").text
+                self.assertNotIn("/api/chat", script)
+                self.assertNotIn("/api/session/", script)
+                self.assertIn("/api/workspaces", script)
+                self.assertIn("/events/stream", script)
 
     def test_invalid_turn_cursor_is_rejected_by_schema(self) -> None:
         """验证负数事件游标在进入 Service 前被 HTTP Schema 拒绝。"""

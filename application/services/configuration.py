@@ -9,10 +9,8 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 
-from ..agent import DeepSeekAgent
 from ..agent.provider import DeepSeekModelProvider, ModelProvider
 from ..config import DeepSeekSettings
-from .chat import AgentChatService
 from .execution import HarnessRuntime
 
 API_KEY_LINE = re.compile(r"^\s*(?:export\s+)?DEEPSEEK_API_KEY\s*=")
@@ -28,44 +26,48 @@ class ApiKeyConfigurationService:
     def __init__(
         self,
         settings: DeepSeekSettings,
-        chat_service: AgentChatService,
         harness_runtime: HarnessRuntime,
         env_path: Path,
     ) -> None:
-        """注入配置快照、两个运行时目标和本地环境文件路径。"""
+        """注入配置快照、Harness Runtime 和本地环境文件路径。"""
         self._settings = settings
-        self._chat_service = chat_service
         self._harness_runtime = harness_runtime
         self._env_path = env_path
         self._lock = threading.Lock()
 
     def configure_api_key(self, api_key: str) -> bool:
-        """首次写入 API Key 并立即启用聊天与 Harness 模型能力。"""
+        """首次写入 API Key 并立即启用 Harness 模型能力。"""
         secret = self._validate_api_key(api_key)
         with self._lock:
-            if self._chat_service.is_ready:
+            if self._harness_runtime.model_ready:
                 raise ApiKeyAlreadyConfiguredError("DeepSeek API Key is already configured")
 
             configured_settings = replace(self._settings, api_key=secret)
-            agent = DeepSeekAgent(
-                configured_settings,
-                tools=self._chat_service.tool_registry,
-            )
             provider: ModelProvider | None = None
             try:
                 provider = DeepSeekModelProvider(configured_settings)
                 self._persist_api_key(secret)
                 os.environ["DEEPSEEK_API_KEY"] = secret
-                self._chat_service.activate_agent(configured_settings, agent)
                 self._harness_runtime.activate_provider(provider)
             except Exception:
-                if not self._chat_service.is_ready:
-                    agent.close()
                 if provider is not None and self._harness_runtime.provider is not provider:
                     provider.close()
                 raise
             self._settings = configured_settings
-            return self._chat_service.is_ready
+            return self._harness_runtime.model_ready
+
+    @property
+    def is_ready(self) -> bool:
+        """返回 Harness 模型 Provider 是否已经可用。"""
+        return self._harness_runtime.model_ready
+
+    def get_public_config(self) -> dict[str, object]:
+        """返回新执行链前端所需且不含密钥的配置。"""
+        return {
+            "ready": self.is_ready,
+            "model": self._settings.model,
+            "workspace_root": self._settings.workspace_root,
+        }
 
     @staticmethod
     def _validate_api_key(api_key: str) -> str:

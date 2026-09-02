@@ -15,7 +15,6 @@ from .agent.provider import DeepSeekModelProvider, UnavailableModelProvider
 from .config import DeepSeekSettings
 from .controllers.http import create_api_router
 from .infrastructure.storage import build_turn_execution_store
-from .services.chat import AgentChatService
 from .services.configuration import ApiKeyConfigurationService
 from .services.execution import HarnessRuntime
 
@@ -26,17 +25,14 @@ load_dotenv()
 def create_app(
     settings: DeepSeekSettings | None = None,
     *,
-    chat_service: AgentChatService | None = None,
     harness_runtime: HarnessRuntime | None = None,
     env_path: Path | None = None,
 ) -> FastAPI:
     """装配配置、应用服务、API 路由和静态资源。"""
     runtime_settings = settings or DeepSeekSettings.from_env()
-    runtime_chat_service = chat_service or AgentChatService(runtime_settings)
     runtime_harness = harness_runtime or _build_harness_runtime(runtime_settings)
     configuration_service = ApiKeyConfigurationService(
         runtime_settings,
-        runtime_chat_service,
         runtime_harness,
         env_path or Path.cwd() / ".env",
     )
@@ -49,20 +45,12 @@ def create_app(
             yield
         finally:
             runtime_harness.close()
-            runtime_chat_service.close()
 
     application = FastAPI(title="Coding-Harness", version="1.0.0", lifespan=lifespan)
     application.state.settings = runtime_settings
-    application.state.chat_service = runtime_chat_service
     application.state.harness_runtime = runtime_harness
     application.state.configuration_service = configuration_service
-    application.include_router(
-        create_api_router(
-            runtime_chat_service,
-            runtime_harness,
-            configuration_service,
-        )
-    )
+    application.include_router(create_api_router(runtime_harness, configuration_service))
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @application.get("/", include_in_schema=False)
@@ -85,7 +73,7 @@ def _build_harness_runtime(settings: DeepSeekSettings) -> HarnessRuntime:
         provider = DeepSeekModelProvider(settings)
     else:
         provider = UnavailableModelProvider()
-    return HarnessRuntime(store, provider)
+    return HarnessRuntime(store, provider, model_ready=bool(settings.api_key))
 
 
 app = create_app()

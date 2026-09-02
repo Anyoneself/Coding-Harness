@@ -1,8 +1,5 @@
-"""模型驱动的 Agent 运行时。"""
+"""模型 Provider 边界。"""
 
-from ..prompts import AGENT_SYSTEM_PROMPT
-from .runtime import DeepSeekAgent
+from .provider import DeepSeekModelProvider, ModelProvider
 
-DEFAULT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
-
-__all__ = ["DEFAULT_SYSTEM_PROMPT", "DeepSeekAgent"]
+__all__ = ["DeepSeekModelProvider", "ModelProvider"]
