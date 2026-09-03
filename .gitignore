@@ -19,5 +19,6 @@ docs/*
 !docs/*/
 docs/*/*
 !docs/*/research.md
-!docs/rd/milestone/
-!docs/rd/milestone/*.md
+!docs/pm/
+!docs/pm/*/
+!docs/pm/*/*.md

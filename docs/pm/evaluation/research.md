@@ -5,7 +5,7 @@
 | 文档状态 | Research / Recommendation |
 | 调研日期 | 2026年08月25日 |
 | 调研范围 | Agent 离线评估、运行轨迹评估、在线监控、Coding Agent 基准与发布门禁 |
-| 项目关联 | My-Agent Python Coding Harness |
+| 项目关联 | Coding-Harness Python 工程 |
 
 ## 1. 执行摘要
 
@@ -30,7 +30,7 @@ Dataset
   -> Baseline Comparison / Release Gate
 ```
 
-对 My-Agent，近期最重要的不是接入一个评分平台，而是先让正式 `DeepSeekAgent` 链路产生可评估的 Run、工具轨迹、Diff、验证结果和成本数据。当前确定性本地 `AgentService` 评估不能代表真实模型链路的成功率。
+对 Coding-Harness，近期最重要的不是接入一个评分平台，而是先让正式 `DeepSeekAgent` 链路产生可评估的 Run、工具轨迹、Diff、验证结果和成本数据。当前确定性本地 `AgentService` 评估不能代表真实模型链路的成功率。
 
 ## 2. 调研范围与方法
 
@@ -183,7 +183,7 @@ Agent 输出具有随机性，单次满分不能证明可靠。建议同时报�
 
 Judge 适合评价需求符合度、代码清晰度、计划合理性、无关修改和最终总结。使用时应保存 Rubric 与 Judge 版本，交换 A/B 顺序检测位置偏差，并用人工标注集校准。Judge 不应覆盖确定性失败或安全阻断。
 
-## 7. My-Agent 当前差距
+## 7. Coding-Harness 当前差距
 
 当前仓库已经具备会话 Event、工具调用事件、Token Usage、本地 Trace 和基础评估模型，但存在四个关键断点：
 
@@ -277,7 +277,7 @@ EvaluationDataset
 - LLM Judge 可能存在位置、长度、风格和模型家族偏差。
 - 只看平均成功率会掩盖高风险失败和不稳定案例。
 - 生产 Trace 可能包含源码、个人信息和密钥，必须采集前脱敏并设置保留期限。
-- 第三方平台的默认模型不能代替 My-Agent 的权限和副作用语义。
+- 第三方平台的默认模型不能代替 Coding-Harness 的权限和副作用语义。
 - 市场产品变化较快，接入前应重新确认部署、数据处理和版本状态。
 
 ## 12. 待确认问题
