@@ -7,15 +7,16 @@
 - **核心场景：** 代码库问答与定位、功能实现、缺陷修复、测试与静态检查、代码审查、文档维护，以及围绕同一代码任务的连续协作。
 - **当前阶段：** 第一阶段“可持续执行”底座已落地，处于第二阶段“安全交付闭环”开始前。新执行链已经是唯一正式运行链，但目前主要完成只读模型 Turn，尚不能安全修改、验证和交付代码变化。
 - **已有能力：** Workspace、Thread、Turn、Item、Checkpoint 和版本化事件；后台单 Worker 调度；SSE 事件重放；主动中断与稳定点恢复；模型调用、Token、时间和成本预算；Provider 与执行 Service 分离；PostgreSQL 生产仓储和 SQLite 契约测试仓储；启动迁移与遗留运行恢复；API Key 首次配置；默认拒绝命令执行的失败关闭沙箱。
-- **关键约束：** 当前为 Python/FastAPI 单体和进程内 Scheduler；同一 Thread 只允许一个活动 Turn；Item 类型目前仅覆盖消息、错误和 Checkpoint；工具调用、审批、ChangeSet、Artifact 和 Verification 尚未实现；可信 OS 沙箱尚未接入；当前只有 DeepSeek ModelProvider；测试评估以执行机制和 Fake Provider 为主，尚未形成真实 Coding Task 发布门禁。
+- **关键约束：** 当前为 Python/FastAPI 单体和进程内 Scheduler；同一 Thread 只允许一个活动 Turn；Item 类型目前仅覆盖消息、错误和 Checkpoint；工具调用、审批、ChangeSet、Artifact 和 Verification 尚未实现；可信 OS 沙箱尚未接入；当前只落地 DeepSeek ModelProvider，但首发必须同时支持 OpenAI、Anthropic 和 OpenAI-compatible 本地模型；测试评估以执行机制和 Fake Provider 为主，尚未形成跨 Provider 的真实 Coding Task 发布门禁。
 
-### 1.1 假设与待确认
+### 1.1 已确认的产品约束与假设
 
+- **已确认：** 产品首发同时提供 Web 工作台和 CLI，两者必须复用同一执行控制面、权限策略和事件协议。
+- **已确认：** 首发支持 DeepSeek、OpenAI、Anthropic，以及通过 OpenAI-compatible 接口接入的本地模型；Provider 架构必须允许后续增加新的供应商和原生本地适配器。
+- **已确认：** 不做运行中静默换模型；用户选择的 Provider、模型和能力快照绑定到 Turn。
 - **假设：** MVP 采用 local-first，代码和命令在用户机器执行。
 - **假设：** MVP 先支持单用户、单个 Turn 串行执行，不做组织级 RBAC。
 - **假设：** Git 仓库是主要工作区，但允许只读打开非 Git 目录。
-- **待确认：** 是否需要优先支持 DeepSeek 之外的 OpenAI、Anthropic 或本地模型。
-- **待确认：** 产品首发入口以 Web 工作台为主，还是以交互式 CLI 为主。
 
 ## 二、主要判断
 
@@ -276,7 +277,7 @@ P0 不提供永久批准。删除、覆盖工作区外文件、提权、读取�
 | 命令超时 | 终止进程组，保存尾部输出，交给 Agent 决定缩小验证或报告 |
 | 工具参数错误 | 返回结构化可修复错误给 Agent，不重试相同参数 |
 | 文件基线冲突 | 阻止写入，要求重新读取并生成新补丁 |
-| 主模型不可用 | P0 明确失败；P1 才允许经过能力校验的模型降级 |
+| 所选 Provider 或模型不可用 | 保持 Turn 版本不变并明确失败；用户可显式选择其他模型重试，禁止运行中静默切换 |
 
 自动恢复必须有预算：`max_model_calls`、`max_tool_calls`、`max_wall_time`、`max_tokens` 和 `max_cost` 任一达到上限即停止并说明原因。
 
@@ -312,7 +313,47 @@ coding-harness resume <thread-id>   # 恢复 Thread
 coding-harness inspect <turn-id>    # 输出状态、Diff 和验证结果
 ```
 
-P0 可以先交付 Web 工作台和最小 `exec` CLI；完整 TUI 延后。
+Web 工作台和 CLI 均属于首发范围。两端必须支持创建与观察 Turn、审批、中断、恢复、查看 ChangeSet 和 Verification；CLI 首发可采用流式文本加稳定 JSON Lines，不要求实现全屏 TUI。
+
+### 3.13 多模型 Provider 扩展设计
+
+首发 Provider 形态：
+
+- `deepseek`：保留现有 DeepSeek Adapter。
+- `openai`：使用 OpenAI 原生 Adapter，保留其工具调用、流式事件、用量和推理摘要能力。
+- `anthropic`：使用 Anthropic 原生 Adapter，在边界内转换 content block、tool use、usage 和 stop reason。
+- `local-openai-compatible`：通过可配置 base URL 接入 Ollama、LM Studio、vLLM 等兼容服务；不假设所有本地模型都支持工具调用。
+- 后续 Provider 通过注册新 Adapter 接入，不修改 TurnExecutionService 和工具执行链。
+
+Provider 公共契约至少包含：
+
+```text
+ProviderRegistry
+  -> ProviderDescriptor(id, display_name, auth_type, config_schema)
+  -> ProviderCapabilities(
+       streaming,
+       tool_calling,
+       structured_output,
+       reasoning_summary,
+       usage,
+       cancellation,
+       context_window
+     )
+  -> ModelProvider.stream(ModelRequest) -> ModelEvent
+```
+
+设计约束：
+
+- `ProviderRegistry` 只负责注册、查找和配置校验，不负责模型选择策略。
+- 每个 Turn 固化 `provider_id`、`model_id`、Provider 配置版本和能力快照，确保恢复与评估可复现。
+- Provider Adapter 只转换供应商协议，不执行工具、不决定审批、不写 Repository。
+- Harness 只消费统一的文本增量、工具提议、完成、用量和错误事件；供应商专有字段保留在 Adapter 内。
+- 启动 Turn 前按任务需要校验能力；缺少 tool calling、context window 或 cancellation 等必要能力时，在任何副作用前失败。
+- API Key、Token 和本地服务地址按 Provider 独立配置；事件、日志和 Checkpoint 只保存 credential reference，不保存明文。
+- 所有 Provider 运行同一套 conformance tests，覆盖流式文本、工具提议、取消、限流、畸形响应、usage 和上下文超限。
+- 不做运行中自动降级。用户可在失败后显式选择其他 Provider 创建新 Turn 或重试，并保留原 Turn 的版本证据。
+
+Web 在创建 Turn 时提供 Provider 与模型选择、能力提示和配置状态；CLI 提供 `providers list`、`models list` 以及 `--provider`、`--model` 参数。两端读取同一 Provider Registry。
 
 ---
 
@@ -330,7 +371,7 @@ ThreadService ---- WorkspaceService
 TurnExecutionService <---- ApprovalService
         |                         |
         v                         v
-ModelProvider ---> ContextBuilder / Checkpoint
+ProviderRegistry ---> ModelProvider ---> ContextBuilder / Checkpoint
         |
         v
 ToolExecutionService ---> ToolPolicyService
@@ -351,7 +392,7 @@ Turn completed ---> ChangeSetService / VerificationService
 | --- | --- | --- |
 | `application.domain.execution` | Workspace、Thread、Turn、Item、Checkpoint、状态机和执行预算 | 增加 ToolInvocation、ApprovalRequest、ChangeSet、Artifact 与 Verification 领域对象 |
 | `application.services.execution` | Thread/Turn 用例、进程内调度、后台执行、事件通知、增量合并、中断和恢复 | 将模型单轮执行扩展为受控工具循环，并接入审批和交付服务 |
-| `application.agent.provider` | ModelProvider 协议与 DeepSeek 流式适配 | 增加能力声明、工具提议事件和供应商契约测试 |
+| `application.agent.provider` | ModelProvider 协议与 DeepSeek 流式适配 | 增加 ProviderRegistry、能力声明、OpenAI/Anthropic/OpenAI-compatible 本地适配器、工具提议事件和统一契约测试 |
 | `application.repositories.execution` | SQLite 执行仓储及共用语义 | 扩展工具、审批、变更和验证的事务写入 |
 | `application.repositories.postgres_turn_execution` | PostgreSQL 执行控制面、租约、事件与 Checkpoint | 增加第二阶段实体表和 Artifact 引用 |
 | `application.controllers.http` | Workspace、Thread、Turn、事件查询/SSE、中断、恢复和配置 API | 增加审批、ChangeSet、Artifact 和 Verification API |
@@ -399,7 +440,17 @@ application/repositories/artifacts.py
 - **产品价值：** 任务已经脱离单次页面连接，执行状态可持续、可查询、可中断、可恢复。
 - **保持门禁：** 后续改动不得恢复 chat/session 双链，不得让 SSE 连接承担执行生命周期，不得绕过 TurnExecutionStore 写执行状态。
 
-#### P0-1 工具提议与执行控制链
+
+#### P0-1 多模型 Provider 首发能力
+
+- **任务：** 在现有 ModelProvider 上增加 ProviderRegistry、ProviderDescriptor 和 ProviderCapabilities，并实现 OpenAI、Anthropic 与 OpenAI-compatible 本地模型 Adapter。
+- **目标与用户价值：** 用户可以使用云端或本地模型完成同一类 Coding Turn，产品不被单一供应商锁定。
+- **前置依赖：** 现有 DeepSeek Provider、TurnExecutionService 和统一 ModelEvent。
+- **预期产出：** 四类 Provider 配置、模型选择、能力预检、凭据引用、统一 conformance tests。
+- **验收标准：** Web 与 CLI 均可选择 Provider/模型；必要能力在执行前校验；四类 Adapter 通过统一流式、工具、取消、usage 和错误契约；增加新 Provider 不修改 TurnExecutionService。
+- **风险及应对：** 本地模型能力差异大；以 capability 明示实际能力，不以协议兼容推断工具调用可用。
+
+#### P0-2 工具提议与执行控制链
 
 - **任务：** 扩展 ModelProvider 事件和 Item 类型，建立 ToolDefinition、ToolInvocation、ToolRegistry、ToolPolicyService 与 ToolExecutionService。
 - **目标与用户价值：** Agent 可以探索仓库并提出动作，同时每个动作都有统一、可解释的控制入口。
@@ -408,49 +459,49 @@ application/repositories/artifacts.py
 - **验收标准：** Agent 无法直接持有或调用底层 handler；所有动作都有 ToolInvocation、Item 和可重放事件。
 - **风险及应对：** 工具循环破坏恢复语义；只在完整工具结果后保存稳定 Checkpoint。
 
-#### P0-2 权限、审批、幂等与可信沙箱
+#### P0-3 权限、审批、幂等与可信沙箱
 
 - **任务：** 实现 allow、ask、deny 策略，结构化审批、action digest、一次/本 Turn 授权、call_id 幂等和可信 SandboxAdapter。
 - **目标与用户价值：** 低风险动作连续执行，高风险动作在执行前由用户掌控。
-- **前置依赖：** P0-1；确定首发平台的 OS 隔离实现。
+- **前置依赖：** P0-2；确定首发平台的 OS 隔离实现。
 - **预期产出：** 审批 API/UI、权限矩阵、命令沙箱、安全回归集。
 - **验收标准：** 路径逃逸、敏感读取和未授权网络被阻断；参数变化后旧审批失效；重复调用不重复产生副作用。
 - **风险及应对：** 跨平台隔离不一致；未通过验证的平台保持命令禁用。
 
-#### P0-3 ChangeSet、冲突检测与 Artifact
+#### P0-4 ChangeSet、冲突检测与 Artifact
 
 - **任务：** 在 Turn 起止记录 Git/文件基线，使用 base hash 阻止覆盖，聚合实际触碰文件并保存大型结果。
 - **目标与用户价值：** 用户能准确审查 Agent 产生的变化，不会丢失自己同时进行的编辑。
-- **前置依赖：** P0-1、P0-2。
+- **前置依赖：** P0-2、P0-3。
 - **预期产出：** ChangeSet、文件变化列表、完整 Diff Artifact 和冲突提示。
 - **验收标准：** 所有写入可归因；既有脏改动与 Turn 新改动可区分；基线变化时拒绝覆盖。
 - **风险及应对：** 大 Diff 影响事件和数据库；事件只存摘要，正文存不可变 Artifact。
 
-#### P0-4 Verification 与完成语义
+#### P0-5 Verification 与完成语义
 
 - **任务：** 记录测试、静态检查和构建命令，生成 Verification Summary，并收紧 completed 条件。
 - **目标与用户价值：** 用户依据可执行证据判断任务是否完成。
-- **前置依赖：** P0-2、P0-3。
+- **前置依赖：** P0-3、P0-4。
 - **预期产出：** 验证结果、失败摘要、未运行说明和剩余风险。
 - **验收标准：** 非零退出码不能显示通过；completed Turn 同时具有最终消息、ChangeSet 和 Verification Summary；只读 Turn 可拥有空 ChangeSet。
 - **风险及应对：** 验证命令耗时或不稳定；沿用 Turn 预算、超时和明确降级结果。
 
-#### P0-5 可审查工作台
+#### P0-6 Web 工作台与 CLI 首发入口
 
-- **任务：** 在现有新链前端上增加执行 Item、审批、Files Changed、Diff、Verification 和错误定位视图。
-- **目标与用户价值：** 用户可以理解执行过程、审批风险、代码变化和验证结果，并继续要求修正。
-- **前置依赖：** P0-1 至 P0-4 的稳定 API。
-- **预期产出：** Workspace/Thread、执行流、Diff/Verification 三栏工作台。
-- **验收标准：** 刷新和重连不丢状态；审批决定与服务端一致；长输出按需查看；所有交付物定位到对应 Turn。
-- **风险及应对：** UI 绑定临时字段；先冻结事件和资源 Schema，再实现展示。
+- **任务：** 在现有 Web 新链上增加执行 Item、审批、Files Changed、Diff、Verification 和错误定位视图；同时交付复用同一 Service/API 的交互式 CLI 与 JSON Lines 模式。
+- **目标与用户价值：** 用户可以在浏览器或终端完成同一套代码任务流程，并获得一致的权限控制、过程状态和交付结果。
+- **前置依赖：** P0-1 至 P0-5 的稳定 API。
+- **预期产出：** Workspace/Thread、执行流、Diff/Verification 三栏工作台；`exec`、`resume`、`inspect`、Provider/模型选择和稳定 JSON Lines CLI。
+- **验收标准：** Web 与 CLI 对同一 Turn 展示一致状态、审批、事件、ChangeSet 和 Verification；刷新、重连和 SIGINT 不丢稳定状态；JSON 输出不混入进度日志。
+- **风险及应对：** 两个入口形成两套逻辑；CLI 和 Web 只做协议适配，先冻结共享事件与资源 Schema。
 
-#### P0-6 真实 Coding Task 评估与发布门禁
+#### P0-7 真实 Coding Task 评估与发布门禁
 
 - **任务：** 直接运行 TurnExecutionService，建立 dev、regression、holdout、security 和 recovery 数据集。
 - **目标与用户价值：** 模型、Prompt、工具、策略或工作流变化都有可量化证据。
-- **前置依赖：** P0-1 至 P0-4。
-- **预期产出：** 版本化任务集、可复现 Workspace、逐例 Trace/ChangeSet 和发布报告。
-- **验收标准：** 安全用例零放行；恢复无事件缺口和重复写入；候选版本不显著降低任务成功率。
+- **前置依赖：** P0-1 至 P0-5。
+- **预期产出：** 版本化任务集、可复现 Workspace、逐例 Trace/ChangeSet、Provider 契约报告和发布报告。
+- **验收标准：** 安全用例零放行；恢复无事件缺口和重复写入；DeepSeek、OpenAI、Anthropic 和本地模型适配器通过统一能力契约；候选版本不显著降低任务成功率。
 - **风险及应对：** 模型波动影响结论；优先使用测试、Diff、权限和文件断言等确定性指标。
 
 ### P1：应该完成
@@ -465,25 +516,25 @@ application/repositories/artifacts.py
 - **验收标准：** 嵌套指令优先级正确；未触发 Skill 不加载全文；每次模型调用可解释上下文来源。
 - **风险及应对：** 指令注入和上下文膨胀；仓库指令标记为受信配置，外部内容标记为不可信数据并设置字节上限。
 
-#### P1-2 模型适配与版本集
+#### P1-2 Provider 治理与模型路由
 
-- **任务：** 抽象 ModelProvider，记录 Prompt、模型、工具、策略和工作流版本集合。
-- **目标与用户价值：** 可按任务选择模型，并定位质量变化来自哪一部分。
+- **任务：** 在首发多 Provider 基础上增加健康状态、模型目录、显式路由策略、配额和组织级默认配置。
+- **目标与用户价值：** 用户可以根据能力、成本和可用性选择模型，同时保持结果可追溯。
 - **负责人角色：** Agent 平台工程师。
-- **前置依赖：** P0-6 评估门禁。
-- **预期产出：** 至少两个 Provider、能力矩阵、版本清单和回放工具。
-- **验收标准：** 不支持工具或上下文能力的模型启动前失败；每个 Turn 可精确追溯版本；模型切换通过回归集。
-- **风险及应对：** 追求统一接口损失厂商能力；公共最小协议加 Provider capability，不强行抹平差异。
+- **前置依赖：** P0 多 Provider 契约和跨 Provider 评估门禁。
+- **预期产出：** Provider 健康检查、模型能力目录、显式路由规则、版本清单和回放工具。
+- **验收标准：** 路由决定可解释；每个 Turn 可精确追溯选择依据和版本；不兼容模型不会进入执行。
+- **风险及应对：** 统一抽象损失供应商能力；公共事件协议加 capability 和供应商扩展字段，不强行抹平差异。
 
-#### P1-3 非交互 CLI 与 CI 模式
+#### P1-3 CLI/CI 自动化增强
 
-- **任务：** 提供 `exec`、`resume`、`inspect` 和 JSON 输出，支持结构化退出码。
-- **目标与用户价值：** Harness 可进入脚本、Git Hook 和 CI，而不依赖浏览器。
+- **任务：** 在首发 CLI 基础上补充输出 Schema、批处理、CI 凭据策略和非交互审批失败模式。
+- **目标与用户价值：** Harness 能稳定进入脚本、Git Hook 和 CI 流程。
 - **负责人角色：** CLI 工程师、后端工程师。
-- **前置依赖：** 稳定 Service 和事件 Schema。
-- **预期产出：** CLI、README、契约测试。
-- **验收标准：** CLI 与 Web 对同一 Turn 展示一致状态；JSON 无进度杂音；中断信号可安全终止并保存 Checkpoint。
-- **风险及应对：** 形成第二套业务逻辑；CLI 只调用 Service/API，不复制执行循环。
+- **前置依赖：** P0 Web/CLI 一致性契约。
+- **预期产出：** 可版本化 JSON Schema、批处理入口、CI 示例和契约测试。
+- **验收标准：** 机器输出向后兼容；CI 遇到 ask 时安全失败；批处理不会绕过 Turn 预算和权限。
+- **风险及应对：** 自动化扩大副作用；CI 使用独立权限档并默认关闭交互式批准。
 
 #### P1-4 OpenTelemetry 与成本治理
 
@@ -514,8 +565,8 @@ P2 的启动条件不是“架构已经留好位置”，而是 P0/P1 指标证�
 详细产品里程碑独立维护，本文只保留迭代关系：
 
 1. [可持续执行](../milestone/01-phase-one-execution-foundation.md)：已完成核心底座。产品从一次性代码聊天演进为可后台运行、重放、中断和恢复的只读任务。
-2. [安全交付闭环](../milestone/02-phase-two-safe-delivery-loop.md)：当前主迭代。产品增加受控工具、审批、可信沙箱、ChangeSet、冲突保护和 Verification。
-3. [可配置内测产品](../milestone/03-phase-three-release-and-hardening.md)：在安全交付稳定后，增加项目指令、Skill、第二 Provider、CLI、可观测性、成本和反馈闭环。
+2. [安全交付闭环](../milestone/02-phase-two-safe-delivery-loop.md)：当前主迭代。产品增加受控工具、审批、可信沙箱、ChangeSet、冲突保护和 Verification，并以 Web 工作台与 CLI 双入口、DeepSeek/OpenAI/Anthropic/本地模型多 Provider 形态首发。
+3. [可配置内测产品](../milestone/03-phase-three-release-and-hardening.md)：在安全交付稳定后，增加项目指令、Skill、Provider 治理与路由策略、自动化集成、可观测性、成本和反馈闭环。
 
 进入下一迭代以当前阶段完成标准为条件，不绑定固定日期、开发周期或人员配置。
 
@@ -549,8 +600,8 @@ P2 的启动条件不是“架构已经留好位置”，而是 P0/P1 指标证�
 
 1. 首发运行平台只支持 macOS，还是必须同时覆盖 Linux/Windows？这直接影响可信 OS 沙箱路线。
 2. 安全交付闭环默认采用 `workspace` 自动写入，还是所有写操作均需审批？这决定默认权限策略和操作效率。
-3. 第二 Provider 优先接入 OpenAI、Anthropic 还是本地模型？当前 DeepSeek Provider 足以继续验证 P0。
-4. P0 的命令网络策略是完全关闭，还是允许用户为特定域配置显式 allowlist？
+3. P0 的命令网络策略是完全关闭，还是允许用户为特定域配置显式 allowlist？
+4. 本地模型首发是否只承诺 OpenAI-compatible 协议，还是必须额外提供 Ollama 原生 Adapter？
 
 ---
 
