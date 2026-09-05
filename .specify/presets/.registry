@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "presets": {
+    "coding-harness": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:8d75d7594a2ee1a39e066ff89d81d1c081c98e5dbb4791e799045d9d71b51986",
+      "enabled": true,
+      "priority": 5,
+      "registered_commands": {
+        "codex": [
+          "speckit.specify",
+          "speckit.plan",
+          "speckit.tasks",
+          "speckit.analyze",
+          "speckit.implement",
+          "speckit.converge"
+        ]
+      },
+      "registered_skills": {
+        "codex": [
+          "speckit-specify",
+          "speckit-plan",
+          "speckit-tasks",
+          "speckit-analyze",
+          "speckit-implement",
+          "speckit-converge"
+        ]
+      },
+      "installed_at": "2026-09-04T04:24:14.914644+00:00"
+    }
+  }
+}

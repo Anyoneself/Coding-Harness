@@ -131,16 +131,17 @@ class ApiKeyConfigurationTests(unittest.TestCase):
                 self.assertEqual(403, response.status_code)
             self.assertFalse(env_path.exists())
 
-    def test_home_contains_first_run_secret_controls(self) -> None:
-        """验证首页提供密码输入、显隐控制和提交动作。"""
+    def test_home_loads_built_frontend_with_first_run_controls(self) -> None:
+        """验证首页加载构建产物，且客户端包含首次密钥配置控件。"""
         application = create_app(DeepSeekSettings(api_key=""))
         with TestClient(application) as client:
             html = client.get("/").text
-        self.assertIn('id="apiKeySetup"', html)
-        self.assertIn('id="apiKeyInput"', html)
-        self.assertIn('type="password"', html)
-        self.assertIn('id="toggleApiKeyVisibility"', html)
-        self.assertIn('id="saveApiKeyButton"', html)
+            script = client.get("/static/app.js").text
+        self.assertIn('id="root"', html)
+        self.assertIn('src="/static/app.js"', html)
+        self.assertIn("/api/config/api-key", script)
+        self.assertIn("显示 API Key", script)
+        self.assertIn("保存并连接", script)
 
 
 if __name__ == "__main__":

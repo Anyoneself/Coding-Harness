@@ -1,0 +1,4 @@
+interface:
+  display_name: "Coding-Harness 前端"
+  short_description: "设计并实现有产品美感的 React 工程工作台"
+  default_prompt: "使用 $coding-harness-frontend 设计、实现或审查 Coding-Harness Web 工作台。"
